@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#191825">
+  <title>Golden Coast — Free Roam</title>
+  <style>
+    :root { color-scheme: dark; font-family: Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #d29d88; }
+    canvas { display: block; }
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; }
+    .hud { position: fixed; inset: 0; z-index: 2; pointer-events: none; color: #fff9ee; }
+    .topbar { position: absolute; top: 30px; left: 36px; right: 36px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .brand { display: flex; align-items: center; gap: 12px; text-shadow: 0 2px 20px #34203677; }
+    .brand-icon { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid #ffffff99; border-radius: 50%; font-size: 19px; }
+    .brand-name { font-family: "Space Grotesk", sans-serif; font-size: 15px; letter-spacing: .22em; font-weight: 700; }
+    .brand-sub { margin-top: 3px; font-size: 9px; font-weight: 700; letter-spacing: .22em; opacity: .8; }
+    .status { display: flex; gap: 9px; align-items: center; padding: 10px 14px; border: 1px solid #ffffff55; border-radius: 30px; background: #372b38aa; backdrop-filter: blur(12px); font-size: 10px; font-weight: 700; letter-spacing: .13em; }
+    .status i { width: 7px; height: 7px; background: #a9f5d5; border-radius: 50%; box-shadow: 0 0 10px #9fffd3; }
+    .location { position: absolute; left: 38px; bottom: 130px; text-shadow: 0 2px 20px #24182899; }
+    .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .23em; text-transform: uppercase; }
+    .location h1 { margin: 8px 0 2px; font: 500 clamp(32px, 4vw, 52px)/1 "Space Grotesk", sans-serif; letter-spacing: -.05em; }
+    .location p { margin: 9px 0 0; font-size: 12px; color: #fff6e3d9; }
+    .bottom { position: absolute; left: 36px; right: 36px; bottom: 30px; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
+    .controls { display: flex; align-items: center; gap: 17px; padding: 13px 16px; border: 1px solid #ffffff35; border-radius: 12px; background: #211e2ab8; backdrop-filter: blur(14px); }
+    .control { display: flex; align-items: center; gap: 7px; color: #eee8e2; font-size: 10px; white-space: nowrap; }
+    kbd { min-width: 24px; height: 23px; display: inline-grid; place-items: center; padding: 0 6px; border: 1px solid #ffffff54; border-radius: 4px; background: #ffffff13; color: white; font: 700 9px "DM Sans", sans-serif; }
+    .divider { height: 23px; width: 1px; background: #ffffff2e; }
+    .map-wrap { display: flex; align-items: end; gap: 12px; }
+    .map-label { text-align: right; text-shadow: 0 1px 8px #2c2630; font-size: 9px; font-weight: 700; letter-spacing: .15em; line-height: 1.8; }
+    .map-label span { color: #ffe2bd; font-size: 9px; font-weight: 400; letter-spacing: .08em; }
+    #minimap { width: 120px; height: 120px; border: 3px solid #ffffffa8; border-radius: 50%; box-shadow: 0 5px 24px #1c182f66; background: #e7bdb2; }
+    .center-dot { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; border-radius: 50%; background: #fff; opacity: .65; box-shadow: 0 0 4px #000; }
+    #intro { position: fixed; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(90deg, #211c2c82, #211c2c24); transition: opacity .35s; }
+    #intro.hidden { opacity: 0; pointer-events: none; }
+    .intro-card { width: min(390px, calc(100vw - 40px)); padding: 30px; border: 1px solid #ffffff45; border-radius: 18px; background: #211c2bdc; box-shadow: 0 25px 80px #1a142c55; backdrop-filter: blur(20px); }
+    .intro-top { display: flex; align-items: center; gap: 9px; color: #ffb6bd; font-size: 10px; font-weight: 700; letter-spacing: .2em; }
+    .intro-top::before { content: ""; width: 25px; height: 1px; background: #ff9cae; }
+    .intro-card h2 { margin: 17px 0 10px; font: 500 35px/1.05 "Space Grotesk", sans-serif; letter-spacing: -.04em; }
+    .intro-card p { margin: 0 0 23px; color: #e2d8d5; font-size: 13px; line-height: 1.65; }
+    button { width: 100%; padding: 14px 17px; display: flex; justify-content: space-between; border: 0; border-radius: 8px; background: #ffb6a8; color: #3a2331; cursor: pointer; font: 700 11px "DM Sans", sans-serif; letter-spacing: .12em; }
+    button:hover { background: #ffcec0; }
+    .intro-foot { margin-top: 15px; color: #c4b8bc; font-size: 10px; text-align: center; }
+    #error { display: none; position: fixed; z-index: 5; top: 12px; left: 50%; transform: translateX(-50%); max-width: 90vw; padding: 12px 18px; border-radius: 8px; background: #531d32; color: white; font-size: 13px; }
+    @media (max-width: 700px) {
+      .topbar { top: 20px; left: 20px; right: 20px; }
+      .bottom { bottom: 18px; left: 20px; right: 20px; }
+      .location { left: 21px; bottom: 110px; }
+      .controls { gap: 8px; padding: 9px; }
+      .control { font-size: 0; gap: 3px; }
+      .divider { display: none; }
+      #minimap { width: 84px; height: 84px; }
+      .map-label { display: none; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+        "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div class="hud">
+    <div class="topbar">
+      <div class="brand"><div class="brand-icon">✳</div><div><div class="brand-name">GOLDEN COAST</div><div class="brand-sub">AN OPEN WORLD EXPERIENCE</div></div></div>
+      <div class="status"><i></i> FREE ROAM <span style="opacity:.45"> / </span> GOLDEN HOUR</div>
+    </div>
+    <div class="center-dot"></div>
+    <div class="location"><div class="eyebrow">✦ &nbsp; WELCOME TO PARADISE</div><h1>Ocean Drive</h1><p>A little closer to the sun.</p></div>
+    <div class="bottom">
+      <div class="controls">
+        <div class="control"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</div><div class="divider"></div>
+        <div class="control"><kbd>SHIFT</kbd> Run</div><div class="divider"></div>
+        <div class="control"><kbd>SPACE</kbd> Jump</div><div class="divider"></div>
+        <div class="control"><kbd>↗</kbd> Look around</div>
+      </div>
+      <div class="map-wrap"><div class="map-label">OCEAN DRIVE<br><span>GOLDEN COAST, FL</span></div><canvas id="minimap" width="240" height="240"></canvas></div>
+    </div>
+  </div>
+  <div id="intro">
+    <div class="intro-card">
+      <div class="intro-top">THE CITY IS YOURS</div>
+      <h2>Stay golden.</h2>
+      <p>Take the scenic route. Explore palm-lined streets, pastel skylines, and a coastline that goes on forever.</p>
+      <button id="start">ENTER THE CITY <span>↗</span></button>
+      <div class="intro-foot">Click to capture mouse · ESC to release</div>
+    </div>
+  </div>
+  <div id="error" role="alert"></div>
+  <script type="module">
+    const showError = (message) => {
+      const box = document.getElementById('error');
+      box.textContent = message;
+      box.style.display = 'block';
+    };
+    try {
+      const THREE = await import('three');
+      const CANNON = await import('cannon-es');
+      const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js');
+      const { RenderPass } = await import('three/addons/postprocessing/RenderPass.js');
+      const { UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js');
+
+      const canvas = document.getElementById('game');
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0xe9a99a, 0.0026);
+      const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 650);
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.24, 0.6, 0.86));
+
+      const sky = new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), new THREE.ShaderMaterial({
+        side: THREE.BackSide, depthWrite: false, fog: false,
+        uniforms: { top: { value: new THREE.Color('#7389b1') }, middle: { value: new THREE.Color('#e6a39d') }, bottom: { value: new THREE.Color('#ffd4a2') } },
+        vertexShader: 'varying vec3 vWorld; void main(){ vec4 w = modelMatrix * vec4(position,1.); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+        fragmentShader: 'uniform vec3 top; uniform vec3 middle; uniform vec3 bottom; varying vec3 vWorld; void main(){ float h = normalize(vWorld).y; vec3 c = mix(bottom,middle,smoothstep(-.12,.24,h)); c = mix(c,top,smoothstep(.15,.85,h)); gl_FragColor=vec4(c,1.); }'
+      }));
+      scene.add(sky);
+      const sun = new THREE.Mesh(new THREE.CircleGeometry(22, 48), new THREE.MeshBasicMaterial({ color: 0xffd5a2, fog: false }));
+      sun.position.set(-220, 95, -350); sun.lookAt(0, 0, 0); scene.add(sun);
+      scene.add(new THREE.HemisphereLight(0xffe6d5, 0x746e80, 2.0));
+      const sunlight = new THREE.DirectionalLight(0xffd1ab, 3.0);
+      sunlight.position.set(-80, 110, -90); sunlight.castShadow = true;
+      sunlight.shadow.mapSize.set(2048, 2048);
+      Object.assign(sunlight.shadow.camera, { left: -120, right: 120, top: 120, bottom: -120, near: 1, far: 350 });
+      sunlight.shadow.normalBias = 0.035;
+      scene.add(sunlight);
+
+      const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -22, 0) });
+      world.broadphase = new CANNON.SAPBroadphase(world);
+      world.defaultContactMaterial.friction = 0;
+      const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+      groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+      groundBody.updateAABB();
+      world.addBody(groundBody);
+      const obstacles = [];
+      function box(x, y, z, w, h, d, material, physics = false, shadows = true) {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+        mesh.position.set(x, y, z); mesh.castShadow = shadows; mesh.receiveShadow = true; scene.add(mesh);
+        if (physics) {
+          const body = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)), position: new CANNON.Vec3(x, y, z) });
+          world.addBody(body);
+          obstacles.push(new THREE.Box3().setFromCenterAndSize(
+            new THREE.Vector3(x, y, z), new THREE.Vector3(w + .5, h + .5, d + .5)
+          ));
+        }
+        return mesh;
+      }
+      function texture(width, height, draw) {
+        const c = document.createElement('canvas'); c.width = width; c.height = height;
+        const ctx = c.getContext('2d'); draw(ctx, width, height);
+        const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); return t;
+      }
+      function basic(color, extras = {}) { return new THREE.MeshStandardMaterial({ color, roughness: 0.88, ...extras }); }
+      let seed = 1986;
+      function rand() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+      const sand = basic(0xe9c296), sidewalkMat = basic(0xdac6bc), waterMat = basic(0x599a9c, { roughness: 0.45, metalness: 0.15 });
+      box(0, -0.3, 0, 245, 0.5, 250, sand, false, false);
+      box(135, -0.28, 0, 65, 0.46, 250, sand, false, false);
+      box(280, -0.38, 0, 240, 0.4, 600, waterMat, false, false);
+      const roadTex = texture(512, 512, (c, w, h) => {
+        c.fillStyle = '#55525a'; c.fillRect(0, 0, w, h);
+        for (let i = 0; i < 6000; i++) { const v = 65 + Math.floor(rand() * 40); c.fillStyle = `rgba(${v},${v},${v},.2)`; c.fillRect(rand()*w, rand()*h, 2, 2); }
+        c.fillStyle = '#d7c6a9'; c.fillRect(251, 0, 3, h); c.fillRect(258, 0, 3, h);
+        c.fillStyle = '#d5d1c6'; for (let y = 0; y < h; y += 104) { c.fillRect(126, y, 3, 53); c.fillRect(383, y, 3, 53); }
+        c.fillStyle = '#bcb9b0'; c.fillRect(8, 0, 3, h); c.fillRect(501, 0, 3, h);
+      });
+      roadTex.wrapT = THREE.RepeatWrapping; roadTex.repeat.set(1, 16);
+      const roadMat = basic(0xffffff, { map: roadTex });
+      const crossTex = texture(256, 256, (c) => {
+        c.fillStyle = '#55525a'; c.fillRect(0,0,256,256);
+        c.fillStyle = '#e6ded1';
+        for (let i=0; i<7; i++) { const p=33+i*29; c.fillRect(p, 13, 17, 40); c.fillRect(p, 203, 17, 40); c.fillRect(13,p,40,17); c.fillRect(203,p,40,17); }
+      });
+      const crossMat = basic(0xffffff, { map: crossTex });
+      const sidewalkTex = texture(256, 256, (c) => {
+        c.fillStyle = '#d8bfb2'; c.fillRect(0,0,256,256);
+        c.strokeStyle = '#bba69e'; c.lineWidth = 2;
+        for (let i=0;i<=256;i+=64) { c.beginPath(); c.moveTo(i,0); c.lineTo(i,256); c.stroke(); c.beginPath(); c.moveTo(0,i); c.lineTo(256,i); c.stroke(); }
+        for (let i=0;i<800;i++) { c.fillStyle='rgba(100,75,70,.07)'; c.fillRect(rand()*256,rand()*256,2,2); }
+      });
+      sidewalkTex.wrapS = sidewalkTex.wrapT = THREE.RepeatWrapping; sidewalkTex.repeat.set(4,4);
+      const walkMat = basic(0xffffff, { map: sidewalkTex });
+      const lines = [-96,-48,0,48,96];
+      for (const p of lines) {
+        box(p, 0.005, 0, 12, 0.03, 204, roadMat, false, false);
+        const horizontal = box(0, 0.007, p, 12, 0.035, 204, roadMat, false, false); horizontal.rotation.y = Math.PI / 2;
+      }
+      for (const x of lines) for (const z of lines) box(x,0.03,z,12,0.04,12,crossMat,false,false);
+      for (const x of [-72,-24,24,72]) for (const z of [-72,-24,24,72]) box(x,0.04,z,36,0.08,36,walkMat,false,false);
+      // The seaside promenade, beach and shallow water form the eastern edge of the city.
+      box(106,0.04,0,8,0.08,204,walkMat,false,false);
+      const plankTex = texture(256,256,(c) => {
+        c.fillStyle='#be927d'; c.fillRect(0,0,256,256); c.strokeStyle='#9e7569'; c.lineWidth=3;
+        for(let x=0;x<256;x+=32){c.beginPath(); c.moveTo(x,0);c.lineTo(x,256);c.stroke();}
+        c.strokeStyle='#d5aa91'; for(let y=0;y<256;y+=64){c.beginPath();c.moveTo(0,y);c.lineTo(256,y);c.stroke();}
+      });
+      plankTex.wrapS=plankTex.wrapT=THREE.RepeatWrapping; plankTex.repeat.set(2,24);
+      box(113,0.12,0,6,0.16,204,basic(0xffffff,{map:plankTex}),false,false);
+      for(let z=-100;z<=100;z+=10) box(116,0.75,z,0.15,1.3,0.15,basic(0xf2d6c1),false,false);
+      box(116,1.3,0,0.15,0.12,204,basic(0xf2d6c1),false,false);
+      // Small, bright bands in the water suggest surf without expensive simulation.
+      for(let i=0;i<14;i++) {
+        const wave = box(157+i*6, -0.14, -110+rand()*200, 0.18, 0.015, 12+rand()*24, basic(0xb1d1c0,{transparent:true,opacity:.35}),false,false);
+        wave.rotation.y = (rand()-.5)*.12;
+      }
+
+      const facadeTextures = ['#e9b5ad','#e7c9b0','#a4cec5','#e7d3b9','#d9a8b2','#c6bdcf'].map((base, index) => texture(512,512,(c) => {
+        c.fillStyle=base; c.fillRect(0,0,512,512);
+        c.fillStyle='rgba(255,244,226,.45)'; for(let y=18;y<512;y+=128) c.fillRect(0,y,512,7);
+        for(let y=38;y<500;y+=96) for(let x=24;x<500;x+=79) {
+          c.fillStyle='#f8e1c9'; c.fillRect(x-5,y-5,54,75);
+          c.fillStyle=(rand()>.42) ? (index%2 ? '#f9c98d' : '#f8d7a2') : '#697c82'; c.fillRect(x,y,44,65);
+          c.fillStyle='rgba(88,97,103,.55)'; c.fillRect(x+20,y,4,65); c.fillRect(x,y+31,44,3);
+          c.fillStyle='rgba(255,255,255,.18)'; c.fillRect(x+3,y+3,8,24);
+        }
+      }));
+      const facadeMats = facadeTextures.map(map => basic(0xffffff,{map}));
+      const trim = basic(0xf5dbc6);
+      const neonPink = new THREE.MeshStandardMaterial({color:0xffa5d7,emissive:0xff238b,emissiveIntensity:2.5});
+      const neonCyan = new THREE.MeshStandardMaterial({color:0xb9ffff,emissive:0x23dad7,emissiveIntensity:2});
+      const signNames = ['THE PALOMA','PARADISE','HOTEL LUNA','THE SUNSET','CASA ROSA','OCEAN CLUB','MOTEL SOL','LA PALM'];
+      const signTextures = signNames.map((name,i) => texture(512,128,(c) => {
+        c.fillStyle='#544450'; c.fillRect(0,0,512,128);
+        c.strokeStyle=i%2?'#8ffcf2':'#ff9fc6'; c.lineWidth=5; c.strokeRect(7,7,498,114);
+        c.shadowColor=i%2?'#55fff2':'#ff65aa'; c.shadowBlur=16; c.fillStyle=i%2?'#b8fff6':'#ffd0e1';
+        c.textAlign='center'; c.textBaseline='middle'; c.font='bold 46px sans-serif'; c.fillText(name,256,67);
+      }));
+      const signMats=signTextures.map(map => new THREE.MeshBasicMaterial({map}));
+      const centers = [-72,-24,24,72];
+      let buildingIndex=0;
+      for (const x of centers) for (const z of centers) {
+        const h = 15 + Math.floor(rand()*16);
+        const w = 22 + Math.floor(rand()*5), d = 22 + Math.floor(rand()*5);
+        const mat = facadeMats[buildingIndex % facadeMats.length];
+        box(x,h/2+0.1,z,w,h,d,mat,true);
+        box(x,h+0.45,z,w+1.3,0.8,d+1.3,trim,false);
+        box(x,h+1.15,z,w*.55,0.8,d*.55,trim,false);
+        // A broad ground-floor awning and a luminous sign face the street.
+        box(x,3.8,z+d/2+0.45,w+0.8,0.5,1.5,trim,false);
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(w-3,16),2.6),signMats[buildingIndex%signMats.length]);
+        sign.position.set(x,5.6,z+d/2+0.035); scene.add(sign);
+        box(x,3.55,z+d/2+1.1,w*.8,0.12,0.12,buildingIndex%2?neonCyan:neonPink,false,false);
+        // Vertical deco fins add silhouette and colored light to the corners.
+        box(x-w/2-0.03,h*.55,z+d/2+.05,.22,h*.65,.22,buildingIndex%2?neonPink:neonCyan,false,false);
+        buildingIndex++;
+      }
+
+      const palmPositions = [];
+      for (const p of [-86,-62,-38,-14,10,34,58,82]) {
+        for (const lane of [-96,-48,0,48,96]) {
+          if (lane !== 96) palmPositions.push([lane+8.7,p]);
+          palmPositions.push([p,lane+8.7]);
+        }
+        palmPositions.push([106,p]); palmPositions.push([126,p+4]);
+      }
+      const dummy = new THREE.Object3D();
+      const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.24,.43,7,7),basic(0x987964),palmPositions.length);
+      trunk.castShadow=true; trunk.receiveShadow=true;
+      const leafGeometry = new THREE.BufferGeometry();
+      leafGeometry.setAttribute('position',new THREE.Float32BufferAttribute([
+        0,0,0,  -.6,-.15,1.3, 0,.3,2.4,
+        0,0,0, 0,.3,2.4, .6,-.15,1.3,
+        -.6,-.15,1.3, -.35,-.65,3.3, 0,-1.25,4.7,
+        -.6,-.15,1.3, 0,-1.25,4.7, 0,.3,2.4,
+        0,.3,2.4, 0,-1.25,4.7, .35,-.65,3.3,
+        0,.3,2.4, .35,-.65,3.3, .6,-.15,1.3
+      ],3));
+      leafGeometry.computeVertexNormals();
+      const leaves = new THREE.InstancedMesh(leafGeometry,basic(0x538573,{side:THREE.DoubleSide}),palmPositions.length*7);
+      leaves.castShadow=true;
+      palmPositions.forEach(([x,z],i) => {
+        const height=6.2+rand()*2.2, scale=height/7;
+        dummy.position.set(x,height/2,z); dummy.rotation.set(0,rand()*.5, (rand()-.5)*.08); dummy.scale.set(1,scale,1); dummy.updateMatrix(); trunk.setMatrixAt(i,dummy.matrix);
+        for(let j=0;j<7;j++) { dummy.position.set(x,height,z); dummy.rotation.set(0,j*Math.PI*2/7+rand()*.25,0); dummy.scale.setScalar(.8+rand()*.35); dummy.updateMatrix(); leaves.setMatrixAt(i*7+j,dummy.matrix); }
+      });
+      scene.add(trunk,leaves);
+      const lampPositions = [];
+      for (const lane of lines) for (const p of [-83,-35,13,61]) lampPositions.push([lane+7.2,p]);
+      const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(.1,.14,6,7),basic(0x4e6665),lampPositions.length);
+      const arms = new THREE.InstancedMesh(new THREE.BoxGeometry(1.7,.12,.12),basic(0x4e6665),lampPositions.length);
+      const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(.22,8,6),new THREE.MeshBasicMaterial({color:0xffe5b3}),lampPositions.length);
+      lampPositions.forEach(([x,z],i) => {
+        dummy.scale.setScalar(1); dummy.rotation.set(0,0,0); dummy.position.set(x,3,z); dummy.updateMatrix(); poles.setMatrixAt(i,dummy.matrix);
+        dummy.position.set(x-.8,6,z); dummy.updateMatrix(); arms.setMatrixAt(i,dummy.matrix);
+        dummy.position.set(x-1.6,5.9,z); dummy.updateMatrix(); bulbs.setMatrixAt(i,dummy.matrix);
+      });
+      scene.add(poles,arms,bulbs);
+
+      // A low-poly articulated pedestrian, centered over a physics sphere.
+      const player = new CANNON.Body({ mass: 5, shape: new CANNON.Sphere(.55), position: new CANNON.Vec3(0, .56, 70), fixedRotation: true, linearDamping: .1, collisionFilterGroup: 2 });
+      player.updateMassProperties(); world.addBody(player);
+      const character = new THREE.Group(); scene.add(character);
+      const skin=basic(0xc58b6b), shirt=basic(0xf5dfcb), pants=basic(0x566e79), hair=basic(0x382d30), shoes=basic(0xe9d9c9);
+      function part(parent, geometry, material, x,y,z) { const m=new THREE.Mesh(geometry,material); m.position.set(x,y,z); m.castShadow=true; parent.add(m); return m; }
+      part(character,new THREE.CapsuleGeometry(.32,.55,4,8),shirt,0,1.38,0);
+      part(character,new THREE.SphereGeometry(.27,12,8),skin,0,2.15,0);
+      part(character,new THREE.SphereGeometry(.275,12,8,0,Math.PI*2,0,Math.PI*.48),hair,0,2.22,0);
+      function limb(x,y,material,length,width) { const pivot=new THREE.Group(); pivot.position.set(x,y,0); character.add(pivot); part(pivot,new THREE.CapsuleGeometry(width,length-width*2,4,8),material,0,-length/2,0); return pivot; }
+      const leftArm=limb(-.43,1.65,skin,.7,.11),rightArm=limb(.43,1.65,skin,.7,.11);
+      const leftLeg=limb(-.18,1.02,pants,.82,.14),rightLeg=limb(.18,1.02,pants,.82,.14);
+      part(leftLeg,new THREE.BoxGeometry(.25,.15,.4),shoes,0,-.8,-.08);
+      part(rightLeg,new THREE.BoxGeometry(.25,.15,.4),shoes,0,-.8,-.08);
+
+      const keys = new Set();
+      let yaw = -.35, pitch = .23, cameraYaw = yaw, cameraPitch = pitch, jumpQueued = false, locked = false;
+      const intro = document.getElementById('intro'), start = document.getElementById('start');
+      start.addEventListener('click', () => {
+        const request = canvas.requestPointerLock();
+        if (request) request.catch(() => showError('Mouse capture was blocked. Please allow pointer lock and try again.'));
+      });
+      document.addEventListener('pointerlockchange', () => {
+        locked = document.pointerLockElement === canvas;
+        intro.classList.toggle('hidden',locked);
+        if (locked) document.getElementById('error').style.display = 'none';
+        if (!locked) { keys.clear(); jumpQueued=false; }
+      });
+      document.addEventListener('pointerlockerror', () => showError('Mouse capture was blocked. Please allow pointer lock and try again.'));
+      document.addEventListener('mousemove', e => { if (locked) { yaw -= e.movementX*.0025; pitch = THREE.MathUtils.clamp(pitch+e.movementY*.002, -.15, .75); } });
+      document.addEventListener('keydown', e => {
+        if (['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
+        if (locked && e.code === 'Space' && !e.repeat) jumpQueued=true;
+        if (locked) keys.add(e.code);
+      });
+      document.addEventListener('keyup', e => keys.delete(e.code));
+      window.addEventListener('blur', () => { keys.clear(); jumpQueued=false; });
+      const cameraRay = new THREE.Ray(), hitPoint = new THREE.Vector3(), lookTarget = new THREE.Vector3(), desired = new THREE.Vector3(), direction = new THREE.Vector3();
+      const groundRay = new CANNON.RaycastResult();
+      let cameraDistance=8, walkTime=0;
+      const clock = new THREE.Clock();
+      const map = document.getElementById('minimap'), mc=map.getContext('2d');
+      function drawMap() {
+        mc.clearRect(0,0,240,240); mc.fillStyle='#e7c2ae'; mc.fillRect(0,0,240,240);
+        const tx=x=>120+x*.88, tz=z=>120+z*.88;
+        mc.fillStyle='#eacb9f'; mc.fillRect(tx(102),0,40,240); mc.fillStyle='#79b8b2'; mc.fillRect(tx(145),0,50,240);
+        mc.strokeStyle='#f4e3d3'; mc.lineWidth=10;
+        for(const p of lines) { mc.beginPath();mc.moveTo(tx(p),tz(-102));mc.lineTo(tx(p),tz(102));mc.stroke(); mc.beginPath();mc.moveTo(tx(-102),tz(p));mc.lineTo(tx(102),tz(p));mc.stroke(); }
+        mc.fillStyle='#c99291';
+        for(const x of centers) for(const z of centers) mc.fillRect(tx(x-12),tz(z-12),21,21);
+        mc.save(); mc.translate(tx(player.position.x),tz(player.position.z)); mc.rotate(-cameraYaw); mc.fillStyle='#fff'; mc.strokeStyle='#503e4d'; mc.lineWidth=3; mc.beginPath();mc.moveTo(0,-10);mc.lineTo(7,8);mc.lineTo(0,5);mc.lineTo(-7,8);mc.closePath();mc.fill();mc.stroke();mc.restore();
+      }
+      function update(dt) {
+        cameraYaw += (yaw-cameraYaw)*(1-Math.exp(-dt*14));
+        cameraPitch += (pitch-cameraPitch)*(1-Math.exp(-dt*14));
+        const forward = new THREE.Vector3(-Math.sin(cameraYaw),0,-Math.cos(cameraYaw));
+        const right = new THREE.Vector3(Math.cos(cameraYaw),0,-Math.sin(cameraYaw));
+        const move = new THREE.Vector3();
+        if(keys.has('KeyW')) move.add(forward);
+        if(keys.has('KeyS')) move.sub(forward);
+        if(keys.has('KeyD')) move.add(right);
+        if(keys.has('KeyA')) move.sub(right);
+        const moving = move.lengthSq()>0;
+        const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 9 : 5;
+        if(moving) move.normalize().multiplyScalar(speed);
+        player.velocity.x=move.x; player.velocity.z=move.z;
+        world.raycastClosest(player.position, new CANNON.Vec3(player.position.x,player.position.y-.68,player.position.z), { skipBackfaces: true, collisionFilterMask: 1 }, groundRay);
+        const grounded = groundRay.hasHit && groundRay.body !== player && groundRay.hitNormalWorld.y > .5;
+        if(jumpQueued && grounded) player.velocity.y=8;
+        jumpQueued=false;
+        world.step(1/60,dt,3);
+        // Keep the playable neighborhood bounded, including the beach.
+        player.position.x=THREE.MathUtils.clamp(player.position.x,-101,151);
+        player.position.z=THREE.MathUtils.clamp(player.position.z,-101,101);
+        character.position.set(player.position.x,player.position.y-.55,player.position.z);
+        if(moving) {
+          const targetAngle = Math.atan2(-move.x,-move.z);
+          character.rotation.y += Math.atan2(Math.sin(targetAngle-character.rotation.y),Math.cos(targetAngle-character.rotation.y))*Math.min(1,dt*12);
+          walkTime += dt*(speed>5?13:9);
+        }
+        const swing=moving && grounded ? Math.sin(walkTime)*.65 : 0;
+        leftLeg.rotation.x=swing; rightLeg.rotation.x=-swing; leftArm.rotation.x=-swing*.75; rightArm.rotation.x=swing*.75;
+        const target = new THREE.Vector3(player.position.x, player.position.y+1.25, player.position.z);
+        lookTarget.copy(target);
+        direction.set(Math.sin(cameraYaw)*Math.cos(cameraPitch),Math.sin(cameraPitch),Math.cos(cameraYaw)*Math.cos(cameraPitch)).normalize();
+        cameraRay.set(lookTarget,direction);
+        let safeDistance=8;
+        for (const bounds of obstacles) {
+          if (cameraRay.intersectBox(bounds, hitPoint)) safeDistance=Math.min(safeDistance,Math.max(0,hitPoint.distanceTo(lookTarget)-.05));
+        }
+        cameraDistance = safeDistance < cameraDistance ? safeDistance : THREE.MathUtils.lerp(cameraDistance,safeDistance,1-Math.exp(-dt*4));
+        desired.copy(lookTarget).addScaledVector(direction,cameraDistance);
+        camera.position.copy(desired); camera.lookAt(lookTarget);
+        character.visible=cameraDistance>2.8;
+        drawMap();
+      }
+      lookTarget.set(player.position.x,player.position.y+1.25,player.position.z);
+      function frame() { requestAnimationFrame(frame); const dt=Math.min(clock.getDelta(),.05); update(dt); composer.render(); }
+      window.addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); });
+      frame();
+    } catch (error) {
+      console.error(error);
+      showError('Unable to start the city. Check your internet connection and WebGL support, then reload.');
+    }
+  </script>
+</body>
+</html>
