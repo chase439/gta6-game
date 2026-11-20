@@ -71,6 +71,7 @@
     .intro-card p { margin: 0 0 23px; color: #e2d8d5; font-size: 13px; line-height: 1.65; }
     button { width: 100%; padding: 14px 17px; display: flex; justify-content: space-between; border: 0; border-radius: 8px; background: #ffb6a8; color: #3a2331; cursor: pointer; font: 700 11px "DM Sans", sans-serif; letter-spacing: .12em; }
     button:hover { background: #ffcec0; }
+    button:disabled { opacity: .7; cursor: wait; }
     .intro-foot { margin-top: 15px; color: #c4b8bc; font-size: 10px; text-align: center; }
     #error { display: none; position: fixed; z-index: 5; top: 12px; left: 50%; transform: translateX(-50%); max-width: 90vw; padding: 12px 18px; border-radius: 8px; background: #531d32; color: white; font-size: 13px; }
     @media (max-width: 700px) {
@@ -149,7 +150,7 @@
       <div class="intro-top">THE CITY IS YOURS</div>
       <h2>Stay golden.</h2>
       <p>Take the scenic route. Explore palm-lined streets, pastel skylines, and a coastline that goes on forever.</p>
-      <button id="start">ENTER THE CITY <span>↗</span></button>
+      <button id="start" disabled><span id="start-label">PREPARING CITY…</span><span>↗</span></button>
       <div class="intro-foot">Click to start audio and capture mouse · ESC to release</div>
     </div>
   </div>
@@ -944,6 +945,12 @@
         const car=createAICar((path[0][0]+path[1][0])/2,path[0][1],[0xd3a078,0x77a4a5,0xd1b7ab,0x9888a2,0xc3b889,0xb47c7b][i]);
         car.path=path; car.target=1; traffic.push(car);
       });
+      const policePool=policeLights.map(lights => {
+        const car=createAICar(0,0,0x202633,true);
+        Object.assign(car,lights);
+        world.removeBody(car.body); scene.remove(car.group);
+        return car;
+      });
       function raiseWanted(victim) {
         const previous=incidentTimes.get(victim) ?? -10;
         if (simulationTime-previous < 3) return;
@@ -1125,8 +1132,15 @@
         });
         if (!options.length) return;
         options.sort((a,b) => Math.abs(Math.hypot(a.x-focus.x,a.z-focus.z)-45)-Math.abs(Math.hypot(b.x-focus.x,b.z-focus.z)-45));
-        const node=options[0], cruiser=createAICar(node.x,node.z,0x202633,true);
-        Object.assign(cruiser,policeLights[police.length]);
+        const node=options[0], cruiser=policePool[police.length];
+        cruiser.body.position.set(node.x,.61,node.z);
+        cruiser.body.previousPosition.copy(cruiser.body.position); cruiser.body.interpolatedPosition.copy(cruiser.body.position);
+        cruiser.body.quaternion.set(0,0,0,1); cruiser.body.velocity.setZero(); cruiser.body.angularVelocity.setZero();
+        cruiser.body.aabbNeedsUpdate=true; cruiser.body.wakeUp();
+        cruiser.group.position.copy(cruiser.body.position); cruiser.group.quaternion.copy(cruiser.body.quaternion);
+        cruiser.speed=0; cruiser.waypoint=null; cruiser.lastPropAlarm=-10;
+        for (const wheel of cruiser.wheels) { wheel.rotation.x=0; wheel.userData.caliper.rotation.x=0; }
+        world.addBody(cruiser.body); scene.add(cruiser.group);
         police.push(cruiser);
       }
       function policeDestination(cruiser,focus) {
@@ -1223,19 +1237,9 @@
         if (locked) lostSightTime=visible ? 0 : lostSightTime+elapsed;
         if (lostSightTime>=15) {
           wantedLevel=0; lostSightTime=0;
-          const sharedGeometry=new Set([cabin,carBodyGeometry,roofGeometry,completeWheelGeometry,caliperGeometry]);
-          const sharedMaterial=new Set([carTrim,glass,headlight,wheelMaterial,caliperMaterial]);
           for (const car of police) {
             car.red.intensity=0; car.blue.intensity=0;
             world.removeBody(car.body); scene.remove(car.group);
-            const geometries=new Set(), materials=new Set();
-            car.group.traverse(object => {
-              if (!object.isMesh) return;
-              if (!sharedGeometry.has(object.geometry)) geometries.add(object.geometry);
-              if (!sharedMaterial.has(object.material)) materials.add(object.material);
-            });
-            for (const geometry of geometries) geometry.dispose();
-            for (const material of materials) material.dispose();
           }
           police.length=0;
           return;
@@ -1338,7 +1342,7 @@
       });
       document.addEventListener('keydown', e => {
         if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','KeyG','KeyX','Digit1','Digit2','Digit3','Digit4','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
-        if (e.code==='KeyG' && !e.repeat) { setQuality(!highQuality); return; }
+        if (e.code==='KeyG' && !e.repeat && !start.disabled) { setQuality(!highQuality); return; }
         if (locked && !e.repeat && ['Digit1','Digit2','Digit3','Digit4'].includes(e.code)) {
           startMission({Digit1:'courier',Digit2:'race',Digit3:'getaway',Digit4:'taxi'}[e.code]); return;
         }
@@ -1573,6 +1577,31 @@
       lookTarget.set(player.position.x,player.position.y+1.25,player.position.z);
       function frame() { requestAnimationFrame(frame); const dt=Math.min(clock.getDelta(),.05); update(dt); if (highQuality) composer.render(); else renderer.render(scene,camera); }
       window.addEventListener('resize', () => { camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); });
+      const warmTarget=new THREE.WebGLRenderTarget(32,32,{type:THREE.HalfFloatType});
+      const warmCamera=new THREE.PerspectiveCamera(60,1,.1,100);
+      const warmGroup=new THREE.Group();
+      warmCamera.position.set(0,3,68); warmCamera.lookAt(0,1,60);
+      for (let i=0;i<policePool.length;i++) {
+        const car=policePool[i]; car.group.position.set((i-1)*3,.61,60); warmGroup.add(car.group);
+      }
+      try {
+        await renderer.compileAsync(warmGroup,warmCamera,scene);
+        renderer.shadowMap.enabled=false; sunlight.castShadow=false;
+        try {
+          await renderer.compileAsync(warmGroup,warmCamera,scene);
+        } finally {
+          renderer.shadowMap.enabled=true; sunlight.castShadow=true;
+        }
+        renderer.setRenderTarget(warmTarget);
+        await renderer.compileAsync(warmGroup,warmCamera,scene);
+        scene.add(warmGroup);
+        renderer.render(scene,warmCamera);
+      } finally {
+        renderer.setRenderTarget(null); warmTarget.dispose();
+        scene.remove(warmGroup);
+        for (const car of policePool) warmGroup.remove(car.group);
+      }
+      document.getElementById('start-label').textContent='ENTER THE CITY'; start.disabled=false;
       frame();
     } catch (error) {
       console.error(error);
