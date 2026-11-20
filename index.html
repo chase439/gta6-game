@@ -28,6 +28,10 @@
     @keyframes wanted-flash { to { opacity: .2; } }
     .escape-label { height: 14px; color: #fff3da; font-size: 9px; font-weight: 700; letter-spacing: .15em; }
     .graphics-hint { padding: 6px 9px; border: 1px solid #ffffff50; border-radius: 6px; background: #211e2a99; font-size: 9px; font-weight: 700; letter-spacing: .12em; }
+    .mission-panel { position: absolute; top: 100px; left: 36px; width: min(300px, calc(100vw - 72px)); padding: 12px 14px; border: 1px solid #ffffff50; border-radius: 9px; background: #211e2ab8; backdrop-filter: blur(12px); font-size: 11px; line-height: 1.5; text-shadow: 0 1px 5px #211828; }
+    .mission-panel strong { display: block; color: #ffddad; font-size: 11px; letter-spacing: .1em; }
+    .mission-panel p { margin: 4px 0 0; }
+    .mission-panel small { display: block; margin-top: 5px; color: #e4d7d4; font-size: 10px; }
     .location { position: absolute; left: 38px; bottom: 180px; text-shadow: 0 2px 20px #24182899; }
     .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .23em; text-transform: uppercase; }
     .location h1 { margin: 8px 0 2px; font: 500 clamp(32px, 4vw, 52px)/1 "Space Grotesk", sans-serif; letter-spacing: -.05em; }
@@ -78,6 +82,7 @@
       .cash { font-size: 15px; }
       .stars { font-size: 16px; }
       .radio-banner { top: 100px; }
+      .mission-panel { top: 82px; left: 20px; width: min(240px, calc(100vw - 40px)); padding: 8px 10px; font-size: 10px; }
     }
   </style>
   <script type="importmap">
@@ -97,9 +102,14 @@
       <div class="brand"><div class="brand-icon">✳</div><div><div class="brand-name">GOLDEN COAST</div><div class="brand-sub">AN OPEN WORLD EXPERIENCE</div></div></div>
       <div class="right-hud">
         <div class="status"><i></i> FREE ROAM <span style="opacity:.45"> / </span> GOLDEN HOUR</div>
-        <div class="crime-hud"><div class="cash">$012,450</div><div id="wanted-stars" class="stars" aria-label="Wanted level: 0 of 5"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div><div id="escape-label" class="escape-label"></div></div>
+        <div class="crime-hud"><div id="cash" class="cash">$012,450</div><div id="wanted-stars" class="stars" aria-label="Wanted level: 0 of 5"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div><div id="escape-label" class="escape-label"></div></div>
         <div id="graphics-status" class="graphics-hint" aria-live="polite">G · HIGH</div>
       </div>
+    </div>
+    <div id="mission-panel" class="mission-panel" aria-live="polite">
+      <strong id="mission-title">CHOOSE A MISSION</strong>
+      <p id="mission-objective">1 Courier · 2 Race · 3 Getaway · 4 Taxi</p>
+      <small id="mission-detail">Enter a car for missions 2–4.</small>
     </div>
     <div class="center-dot"></div>
     <div class="location"><div class="eyebrow">✦ &nbsp; WELCOME TO PARADISE</div><h1>Ocean Drive</h1><p>A little closer to the sun.</p></div>
@@ -795,6 +805,104 @@
         incidentTimes.set(victim,simulationTime);
         wantedLevel=Math.min(5,wantedLevel+1); lostSightTime=0;
       }
+      const missionTitle=document.getElementById('mission-title'), missionObjective=document.getElementById('mission-objective');
+      const missionDetail=document.getElementById('mission-detail'), cashDisplay=document.getElementById('cash');
+      const missionMarker=new THREE.Group();
+      const markerRing=new THREE.Mesh(new THREE.RingGeometry(3,3.35,32),new THREE.MeshBasicMaterial({color:0xffe786,side:THREE.DoubleSide,transparent:true,opacity:.9,depthWrite:false}));
+      markerRing.rotation.x=-Math.PI/2; markerRing.position.y=.12;
+      const markerBeam=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,7,24,1,true),new THREE.MeshBasicMaterial({color:0xffdb72,side:THREE.DoubleSide,transparent:true,opacity:.16,depthWrite:false}));
+      markerBeam.position.y=3.5; missionMarker.add(markerRing,markerBeam); missionMarker.visible=false; scene.add(missionMarker);
+      const passenger=createPedestrian(0,0,0);
+      passenger.group.position.set(54,0,48); passenger.group.visible=false;
+      let cash=12450, mission=null, lastMissionUpdate=performance.now();
+      const raceRoute=[[0,0],[48,0],[48,-48],[-48,-48],[-48,48]];
+      function setMissionText(element,text) {
+        if (element.textContent!==text) element.textContent=text;
+      }
+      function missionTarget() {
+        if (!mission) return null;
+        if (mission.type==='courier') return [96,-48];
+        if (mission.type==='race') return raceRoute[mission.checkpoint];
+        if (mission.type==='getaway') return mission.stage==='safe' ? [-48,48] : null;
+        return mission.stage==='pickup' ? [48,48] : [-48,-48];
+      }
+      function finishMission(success,reason) {
+        const completed=mission;
+        if (!completed) return;
+        if (success) {
+          cash+=completed.reward;
+          cashDisplay.textContent='$'+cash.toLocaleString('en-US',{minimumIntegerDigits:6});
+        }
+        mission=null; missionMarker.visible=false; passenger.group.visible=false;
+        missionTitle.textContent=success ? 'MISSION COMPLETE' : 'MISSION ENDED';
+        missionObjective.textContent=success ? `${completed.name} · +$${completed.reward}` : reason;
+        missionDetail.textContent='1 Courier · 2 Race · 3 Getaway · 4 Taxi';
+      }
+      function startMission(type) {
+        if (mission) {
+          mission.noticeUntil=performance.now()+2000;
+          return;
+        }
+        if (type!=='courier' && !activeCar) {
+          missionTitle.textContent='VEHICLE REQUIRED';
+          missionObjective.textContent='Enter a car with F before starting this mission.';
+          missionDetail.textContent='1 Courier · 2 Race · 3 Getaway · 4 Taxi';
+          return;
+        }
+        const choices={
+          courier:{name:'COASTAL COURIER',reward:500,time:180,stage:'delivery'},
+          race:{name:'STREET RACE',reward:750,time:150,stage:'race',checkpoint:0},
+          getaway:{name:'GETAWAY DRIVER',reward:1000,stage:wantedLevel ? 'escape' : 'incident'},
+          taxi:{name:'TAXI RUN',reward:400,stage:'pickup'}
+        };
+        mission={type,...choices[type],car:activeCar,noticeUntil:0};
+        passenger.group.visible=type==='taxi';
+        lastMissionUpdate=performance.now();
+        updateMission(0);
+      }
+      function failTaxiForCollision() {
+        if (mission && mission.type==='taxi' && mission.stage==='dropoff') finishMission(false,'Passenger left after the car was damaged.');
+      }
+      function updateMission(elapsed) {
+        if (!mission) return;
+        if (mission.type!=='courier' && activeCar!==mission.car) {
+          finishMission(false,'You left the mission vehicle.');
+          return;
+        }
+        if (mission.time!==undefined) {
+          mission.time-=elapsed;
+          if (mission.time<=0) { finishMission(false,'Time ran out.'); return; }
+        }
+        if (mission.type==='getaway') {
+          if (wantedLevel>0) mission.stage='escape';
+          else if (mission.stage==='escape') mission.stage='safe';
+        }
+        const target=missionTarget(), focus=activeCar ? activeCar.body.position : player.position;
+        const distance=target ? Math.hypot(focus.x-target[0],focus.z-target[1]) : null;
+        const stopped=activeCar && Math.hypot(activeCar.body.velocity.x,activeCar.body.velocity.z)*3.6<3;
+        if (target && distance<6) {
+          if (mission.type==='courier' || (mission.type==='getaway' && wantedLevel===0)) { finishMission(true); return; }
+          if (mission.type==='race') {
+            mission.checkpoint++;
+            if (mission.checkpoint===raceRoute.length) { finishMission(true); return; }
+          } else if (mission.type==='taxi' && stopped) {
+            if (mission.stage==='pickup') { mission.stage='dropoff'; passenger.group.visible=false; }
+            else { finishMission(true); return; }
+          }
+        }
+        const next=missionTarget();
+        missionMarker.visible=Boolean(next);
+        if (next) missionMarker.position.set(next[0],0,next[1]);
+        setMissionText(missionTitle,mission.name);
+        let objective;
+        if (mission.type==='courier') objective='Deliver the package to the gold marker.';
+        else if (mission.type==='race') objective=`Drive through checkpoints ${mission.checkpoint+1}/${raceRoute.length}.`;
+        else if (mission.type==='getaway') objective=mission.stage==='incident' ? 'Hit a traffic car, pedestrian, or streetlamp to attract police.' : mission.stage==='escape' ? 'Lose the police: stay out of sight for 15 seconds.' : 'Reach the gold safe spot without police attention.';
+        else objective=mission.stage==='pickup' ? 'Stop at the gold marker to pick up your passenger.' : 'Stop at the destination without crashing.';
+        setMissionText(missionObjective,objective);
+        const remaining=mission.time===undefined ? '' : ` · ${Math.ceil(mission.time)}s left`;
+        setMissionText(missionDetail,performance.now()<mission.noticeUntil ? 'Press X to cancel before choosing another mission.' : `Reward $${mission.reward}${remaining} · X to cancel`);
+      }
       function frightenPedestrians(origin, radius=24) {
         for (const person of pedestrians) {
           const away=new THREE.Vector3(person.group.position.x-origin.x,0,person.group.position.z-origin.z);
@@ -811,6 +919,7 @@
         const impact=Math.abs(event.contact.getImpactVelocityAlongNormal());
         if (event.body===groundBody || impact<1.5) return;
         if (car===activeCar) crashSound(impact);
+        if (car===activeCar) failTaxiForCollision();
         frightenPedestrians(car.body.position);
         if (car===activeCar && (lampBodies.includes(event.body) || traffic.some(other => other.body===event.body))) raiseWanted(event.body);
       });
@@ -873,6 +982,7 @@
             const local=activeCar.body.quaternion.conjugate().vmult(offset);
             if (Math.abs(local.x)<1.25 && Math.abs(local.y)<1.6 && Math.abs(local.z)<2.5 && simulationTime-person.lastHit>3) {
               crashSound(Math.hypot(activeCar.body.velocity.x,activeCar.body.velocity.z));
+              failTaxiForCollision();
               person.lastHit=simulationTime; raiseWanted(person); frightenPedestrians(activeCar.body.position);
             }
           }
@@ -1038,6 +1148,7 @@
       document.addEventListener('pointerlockchange', () => {
         locked = document.pointerLockElement === canvas;
         lastEscapeUpdate=performance.now();
+        lastMissionUpdate=performance.now();
         intro.classList.toggle('hidden',locked);
         if (locked) document.getElementById('error').style.display = 'none';
         if (!locked) { keys.clear(); jumpQueued=false; }
@@ -1051,8 +1162,12 @@
         }
       });
       document.addEventListener('keydown', e => {
-        if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','KeyG','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
+        if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','KeyG','KeyX','Digit1','Digit2','Digit3','Digit4','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
         if (e.code==='KeyG' && !e.repeat) { setQuality(!highQuality); return; }
+        if (locked && !e.repeat && ['Digit1','Digit2','Digit3','Digit4'].includes(e.code)) {
+          startMission({Digit1:'courier',Digit2:'race',Digit3:'getaway',Digit4:'taxi'}[e.code]); return;
+        }
+        if (locked && e.code==='KeyX' && !e.repeat) { if (mission) finishMission(false,'Mission cancelled.'); return; }
         if (locked && e.code === 'KeyF' && !e.repeat) { toggleVehicle(); return; }
         if (locked && activeCar && e.code === 'KeyR' && !e.repeat) { radioEnabled=!radioEnabled; return; }
         if (locked && !activeCar && e.code === 'Space' && !e.repeat) jumpQueued=true;
@@ -1061,6 +1176,7 @@
       document.addEventListener('keyup', e => keys.delete(e.code));
       window.addEventListener('blur', () => { keys.clear(); jumpQueued=false; });
       document.addEventListener('visibilitychange', () => {
+        lastMissionUpdate=performance.now();
         if (document.hidden && audio && audio.context.state==='running') {
           const now=audio.context.currentTime;
           audio.master.gain.setTargetAtTime(0,now,.02);
@@ -1084,6 +1200,14 @@
         for (const car of [...cars,...traffic]) { mc.beginPath(); mc.arc(tx(car.body.position.x),tz(car.body.position.z),3.5,0,Math.PI*2); mc.fill(); }
         mc.fillStyle=Math.floor(simulationTime*5)%2 ? '#ff374d' : '#339dff';
         for (const car of police) { mc.beginPath(); mc.arc(tx(car.body.position.x),tz(car.body.position.z),5,0,Math.PI*2); mc.fill(); }
+        const target=missionTarget();
+        if (target) {
+          let dx=tx(target[0])-120, dz=tz(target[1])-120;
+          const length=Math.hypot(dx,dz);
+          if (length>104) { dx*=104/length; dz*=104/length; }
+          mc.fillStyle='#ffcf49'; mc.strokeStyle='#4b3540'; mc.lineWidth=2;
+          mc.beginPath(); mc.arc(120+dx,120+dz,6,0,Math.PI*2); mc.fill(); mc.stroke();
+        }
         const back=activeCar && activeCar.body.quaternion.vmult(new CANNON.Vec3(0,0,1));
         const heading=back ? Math.atan2(back.x,back.z) : character.rotation.y;
         mc.save(); mc.translate(120,120); mc.rotate(-heading); mc.fillStyle='#fff'; mc.strokeStyle='#503e4d'; mc.lineWidth=3; mc.beginPath();mc.moveTo(0,-10);mc.lineTo(7,8);mc.lineTo(0,5);mc.lineTo(-7,8);mc.closePath();mc.fill();mc.stroke();mc.restore();
@@ -1135,6 +1259,9 @@
         updateTraffic(dt);
         updatePolice(dt,activeCar ? activeCar.body.position : player.position);
         world.step(1/60,dt,3);
+        const missionNow=performance.now();
+        if (locked && !document.hidden) updateMission((missionNow-lastMissionUpdate)/1000);
+        lastMissionUpdate=missionNow;
         for (const car of cars) {
           car.group.position.copy(car.body.position);
           car.group.quaternion.copy(car.body.quaternion);
