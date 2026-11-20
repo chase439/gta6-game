@@ -32,6 +32,11 @@
     .mission-panel strong { display: block; color: #ffddad; font-size: 11px; letter-spacing: .1em; }
     .mission-panel p { margin: 4px 0 0; }
     .mission-panel small { display: block; margin-top: 5px; color: #e4d7d4; font-size: 10px; }
+    .gps-guidance { display: flex; align-items: center; gap: 9px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ffffff35; color: #9af9f2; }
+    .gps-guidance[hidden] { display: none; }
+    .gps-arrow { display: inline-block; font-size: 22px; line-height: 1; text-align: center; }
+    .gps-copy { font-size: 10px; font-weight: 700; }
+    .gps-copy span { display: block; color: #eee8e2; font-weight: 400; }
     .location { position: absolute; left: 38px; bottom: 180px; text-shadow: 0 2px 20px #24182899; }
     .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .23em; text-transform: uppercase; }
     .location h1 { margin: 8px 0 2px; font: 500 clamp(32px, 4vw, 52px)/1 "Space Grotesk", sans-serif; letter-spacing: -.05em; }
@@ -110,6 +115,10 @@
       <strong id="mission-title">CHOOSE A MISSION</strong>
       <p id="mission-objective">1 Courier · 2 Race · 3 Getaway · 4 Taxi</p>
       <small id="mission-detail">Enter a car for missions 2–4.</small>
+      <div id="gps-guidance" class="gps-guidance" aria-live="off" hidden>
+        <span id="gps-arrow" class="gps-arrow" aria-hidden="true">↑</span>
+        <div class="gps-copy"><div id="gps-distance"></div><span id="gps-preview"></span></div>
+      </div>
     </div>
     <div class="center-dot"></div>
     <div class="location"><div class="eyebrow">✦ &nbsp; WELCOME TO PARADISE</div><h1>Ocean Drive</h1><p>A little closer to the sun.</p></div>
@@ -807,11 +816,23 @@
       }
       const missionTitle=document.getElementById('mission-title'), missionObjective=document.getElementById('mission-objective');
       const missionDetail=document.getElementById('mission-detail'), cashDisplay=document.getElementById('cash');
-      const missionMarker=new THREE.Group();
-      const markerRing=new THREE.Mesh(new THREE.RingGeometry(3,3.35,32),new THREE.MeshBasicMaterial({color:0xffe786,side:THREE.DoubleSide,transparent:true,opacity:.9,depthWrite:false}));
-      markerRing.rotation.x=-Math.PI/2; markerRing.position.y=.12;
-      const markerBeam=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,7,24,1,true),new THREE.MeshBasicMaterial({color:0xffdb72,side:THREE.DoubleSide,transparent:true,opacity:.16,depthWrite:false}));
-      markerBeam.position.y=3.5; missionMarker.add(markerRing,markerBeam); missionMarker.visible=false; scene.add(missionMarker);
+      function createMissionMarker(color,opacity) {
+        const group=new THREE.Group();
+        const ring=new THREE.Mesh(new THREE.RingGeometry(3,3.35,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity,depthWrite:false}));
+        ring.rotation.x=-Math.PI/2; ring.position.y=.12;
+        const beam=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,16,24,1,true),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,transparent:true,opacity:opacity*.2,depthWrite:false}));
+        beam.position.y=8; group.add(ring,beam); group.visible=false; scene.add(group);
+        return group;
+      }
+      const missionMarker=createMissionMarker(0xffdf70,.9), nextMarker=createMissionMarker(0x61f5e8,.65);
+      const routeGeometry=new THREE.BoxGeometry(1,.02,1);
+      const routeMaterial=new THREE.MeshBasicMaterial({color:0x42ded0,transparent:true,opacity:.75,depthWrite:false});
+      const routeSegments=Array.from({length:3},() => {
+        const mesh=new THREE.Mesh(routeGeometry,routeMaterial);
+        mesh.visible=false; scene.add(mesh); return mesh;
+      });
+      const gpsGuidance=document.getElementById('gps-guidance'), gpsArrow=document.getElementById('gps-arrow');
+      const gpsDistance=document.getElementById('gps-distance'), gpsPreview=document.getElementById('gps-preview');
       const passenger=createPedestrian(0,0,0);
       passenger.group.position.set(54,0,48); passenger.group.visible=false;
       let cash=12450, mission=null, lastMissionUpdate=performance.now();
@@ -826,6 +847,21 @@
         if (mission.type==='getaway') return mission.stage==='safe' ? [-48,48] : null;
         return mission.stage==='pickup' ? [48,48] : [-48,-48];
       }
+      function nextRaceTarget() {
+        return mission && mission.type==='race' ? raceRoute[mission.checkpoint+1] || null : null;
+      }
+      function navigationRoute(focus,target) {
+        const x=focus.x, z=focus.z;
+        const nearest=value => lines.reduce((best,line) => Math.abs(line-value)<Math.abs(best-value) ? line : best);
+        const roadX=nearest(x), roadZ=nearest(z);
+        const vertical=[roadX,THREE.MathUtils.clamp(z,lines[0],lines[lines.length-1])];
+        const horizontal=[THREE.MathUtils.clamp(x,lines[0],lines[lines.length-1]),roadZ];
+        const useVertical=Math.hypot(x-vertical[0],z-vertical[1])<=Math.hypot(x-horizontal[0],z-horizontal[1]);
+        const entry=useVertical ? vertical : horizontal;
+        const turn=useVertical ? [entry[0],target[1]] : [target[0],entry[1]];
+        const points=[[x,z],entry,turn,target];
+        return points.filter((point,i) => i===0 || Math.hypot(point[0]-points[i-1][0],point[1]-points[i-1][1])>.01);
+      }
       function finishMission(success,reason) {
         const completed=mission;
         if (!completed) return;
@@ -833,7 +869,8 @@
           cash+=completed.reward;
           cashDisplay.textContent='$'+cash.toLocaleString('en-US',{minimumIntegerDigits:6});
         }
-        mission=null; missionMarker.visible=false; passenger.group.visible=false;
+        mission=null; missionMarker.visible=false; nextMarker.visible=false; passenger.group.visible=false;
+        gpsGuidance.hidden=true; for (const segment of routeSegments) segment.visible=false;
         missionTitle.textContent=success ? 'MISSION COMPLETE' : 'MISSION ENDED';
         missionObjective.textContent=success ? `${completed.name} · +$${completed.reward}` : reason;
         missionDetail.textContent='1 Courier · 2 Race · 3 Getaway · 4 Taxi';
@@ -1187,6 +1224,36 @@
       let cameraDistance=8, walkTime=0;
       const clock = new THREE.Clock();
       const map = document.getElementById('minimap'), mc=map.getContext('2d');
+      function updateNavigation(focus,target) {
+        const preview=nextRaceTarget();
+        nextMarker.visible=Boolean(target && preview);
+        if (nextMarker.visible) nextMarker.position.set(preview[0],0,preview[1]);
+        gpsGuidance.hidden=!target;
+        if (!target) {
+          for (const segment of routeSegments) segment.visible=false;
+          return [];
+        }
+        const route=navigationRoute(focus,target);
+        let distance=0;
+        for (let i=0;i<routeSegments.length;i++) {
+          const segment=routeSegments[i], from=route[i], to=route[i+1];
+          segment.visible=Boolean(from && to);
+          if (!segment.visible) continue;
+          const dx=to[0]-from[0], dz=to[1]-from[1], length=Math.hypot(dx,dz);
+          distance+=length;
+          segment.position.set((from[0]+to[0])/2,.11,(from[1]+to[1])/2);
+          segment.scale.set(.6,1,length);
+          segment.rotation.y=Math.atan2(dx,dz);
+        }
+        const waypoint=route.slice(1).find(point => Math.hypot(point[0]-focus.x,point[1]-focus.z)>4) || target;
+        const dx=waypoint[0]-focus.x, dz=waypoint[1]-focus.z;
+        const right=dx*Math.cos(cameraYaw)-dz*Math.sin(cameraYaw);
+        const forward=-dx*Math.sin(cameraYaw)-dz*Math.cos(cameraYaw);
+        gpsArrow.style.transform=`rotate(${Math.atan2(right,forward)}rad)`;
+        setMissionText(gpsDistance,`FOLLOW GPS · ${Math.round(distance)} m`);
+        setMissionText(gpsPreview,preview ? `Gold: current · Cyan: checkpoint ${mission.checkpoint+2}` : 'Gold: destination');
+        return route;
+      }
       function drawMap() {
         mc.clearRect(0,0,240,240); mc.fillStyle='#e7c2ae'; mc.fillRect(0,0,240,240);
         const focus=activeCar ? activeCar.body.position : player.position;
@@ -1196,18 +1263,30 @@
         for(const p of lines) { mc.beginPath();mc.moveTo(tx(p),tz(-102));mc.lineTo(tx(p),tz(102));mc.stroke(); mc.beginPath();mc.moveTo(tx(-102),tz(p));mc.lineTo(tx(102),tz(p));mc.stroke(); }
         mc.fillStyle='#c99291';
         for(const x of centers) for(const z of centers) mc.fillRect(tx(x-12),tz(z-12),38.4,38.4);
+        const target=missionTarget(), preview=nextRaceTarget(), route=updateNavigation(focus,target);
+        if (route.length>1) {
+          mc.lineCap='round'; mc.lineJoin='round'; mc.strokeStyle='#285c62'; mc.lineWidth=9;
+          mc.beginPath(); mc.moveTo(tx(route[0][0]),tz(route[0][1]));
+          for (const point of route.slice(1)) mc.lineTo(tx(point[0]),tz(point[1]));
+          mc.stroke(); mc.strokeStyle='#5af5e4'; mc.lineWidth=5; mc.stroke();
+        }
+        if (target && preview) {
+          mc.beginPath(); mc.setLineDash([6,5]); mc.strokeStyle='#39d0db'; mc.lineWidth=4;
+          mc.moveTo(tx(target[0]),tz(target[1])); mc.lineTo(tx(preview[0]),tz(preview[1])); mc.stroke(); mc.setLineDash([]);
+        }
         mc.fillStyle='#f9f2d8';
         for (const car of [...cars,...traffic]) { mc.beginPath(); mc.arc(tx(car.body.position.x),tz(car.body.position.z),3.5,0,Math.PI*2); mc.fill(); }
         mc.fillStyle=Math.floor(simulationTime*5)%2 ? '#ff374d' : '#339dff';
         for (const car of police) { mc.beginPath(); mc.arc(tx(car.body.position.x),tz(car.body.position.z),5,0,Math.PI*2); mc.fill(); }
-        const target=missionTarget();
-        if (target) {
-          let dx=tx(target[0])-120, dz=tz(target[1])-120;
+        function mapMarker(point,color) {
+          let dx=tx(point[0])-120, dz=tz(point[1])-120;
           const length=Math.hypot(dx,dz);
           if (length>104) { dx*=104/length; dz*=104/length; }
-          mc.fillStyle='#ffcf49'; mc.strokeStyle='#4b3540'; mc.lineWidth=2;
+          mc.fillStyle=color; mc.strokeStyle='#4b3540'; mc.lineWidth=2;
           mc.beginPath(); mc.arc(120+dx,120+dz,6,0,Math.PI*2); mc.fill(); mc.stroke();
         }
+        if (target && preview) mapMarker(preview,'#5af5e4');
+        if (target) mapMarker(target,'#ffcf49');
         const back=activeCar && activeCar.body.quaternion.vmult(new CANNON.Vec3(0,0,1));
         const heading=back ? Math.atan2(back.x,back.z) : character.rotation.y;
         mc.save(); mc.translate(120,120); mc.rotate(-heading); mc.fillStyle='#fff'; mc.strokeStyle='#503e4d'; mc.lineWidth=3; mc.beginPath();mc.moveTo(0,-10);mc.lineTo(7,8);mc.lineTo(0,5);mc.lineTo(-7,8);mc.closePath();mc.fill();mc.stroke();mc.restore();
