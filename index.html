@@ -759,6 +759,12 @@
       let yaw = -.35, pitch = .23, cameraYaw = yaw, cameraPitch = pitch, driveOrbit = 0, jumpQueued = false, locked = false, activeCar = null;
       let wantedLevel=0, lostSightTime=0, simulationTime=0, lastEscapeUpdate=performance.now();
       const traffic=[], police=[], pedestrians=[], incidentTimes=new Map();
+      // Keep the light count fixed so police spawns do not recompile scene shaders.
+      const policeLights=Array.from({length:3},() => {
+        const red=new THREE.PointLight(0xff2039,0,16,2), blue=new THREE.PointLight(0x298dff,0,16,2);
+        scene.add(red,blue);
+        return {red,blue};
+      });
       const stars=document.getElementById('wanted-stars'), escapeLabel=document.getElementById('escape-label');
       let audio=null, radioEnabled=true;
       const radioBanner=document.getElementById('radio-banner'), radioStatus=document.getElementById('radio-status');
@@ -921,16 +927,13 @@
           const wheel=createWheelVisual(); wheel.position.set(wx,-.19,wz); group.add(wheel);
           wheels.push(wheel);
         }
-        let red=null, blue=null;
         if (isPolice) {
           const redMaterial=new THREE.MeshBasicMaterial({color:new THREE.Color(0xff3049).multiplyScalar(2),toneMapped:false});
           const blueMaterial=new THREE.MeshBasicMaterial({color:new THREE.Color(0x42a9ff).multiplyScalar(2),toneMapped:false});
           carBox(group,redMaterial,-.35,1.14,.15,.65,.18,.3);
           carBox(group,blueMaterial,.35,1.14,.15,.65,.18,.3);
-          red=new THREE.PointLight(0xff2039,0,16,2); red.position.set(-.35,1.5,.15); group.add(red);
-          blue=new THREE.PointLight(0x298dff,0,16,2); blue.position.set(.35,1.5,.15); group.add(blue);
         }
-        return {body,group,wheels,red,blue,speed:0,waypoint:null,lastPropAlarm:-10};
+        return {body,group,wheels,red:null,blue:null,speed:0,waypoint:null,lastPropAlarm:-10};
       }
       const trafficRoutes=[
         [-96,-48,-96,-48],[-48,0,-48,0],[0,48,-96,-48],
@@ -1123,6 +1126,7 @@
         if (!options.length) return;
         options.sort((a,b) => Math.abs(Math.hypot(a.x-focus.x,a.z-focus.z)-45)-Math.abs(Math.hypot(b.x-focus.x,b.z-focus.z)-45));
         const node=options[0], cruiser=createAICar(node.x,node.z,0x202633,true);
+        Object.assign(cruiser,policeLights[police.length]);
         police.push(cruiser);
       }
       function policeDestination(cruiser,focus) {
@@ -1222,6 +1226,7 @@
           const sharedGeometry=new Set([cabin,carBodyGeometry,roofGeometry,completeWheelGeometry,caliperGeometry]);
           const sharedMaterial=new Set([carTrim,glass,headlight,wheelMaterial,caliperMaterial]);
           for (const car of police) {
+            car.red.intensity=0; car.blue.intensity=0;
             world.removeBody(car.body); scene.remove(car.group);
             const geometries=new Set(), materials=new Set();
             car.group.traverse(object => {
@@ -1486,6 +1491,10 @@
         }
         for (const car of [...traffic,...police]) {
           car.group.position.copy(car.body.position); car.group.quaternion.copy(car.body.quaternion);
+          if (car.red) {
+            car.red.position.set(-.35,1.5,.15).applyQuaternion(car.group.quaternion).add(car.group.position);
+            car.blue.position.set(.35,1.5,.15).applyQuaternion(car.group.quaternion).add(car.group.position);
+          }
           for (const wheel of car.wheels) {
             wheel.rotation.x-=car.speed*dt/.42;
             wheel.userData.caliper.rotation.x=-wheel.rotation.x;
