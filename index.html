@@ -1255,13 +1255,31 @@
             } else stopDistance=2.45;
           }
           const speed=distance>.2 ? Math.min(13,Math.max(0,(distance-stopDistance)/Math.max(dt,.001))) : 0;
-          car.speed=speed;
           if (distance>.2) {
             car.body.velocity.set(dx/distance*speed,0,dz/distance*speed);
-            car.body.quaternion.setFromEuler(0,Math.atan2(-dx,-dz),0);
           } else car.body.velocity.setZero();
           const flash=Math.floor(simulationTime*5)%2===0;
           car.red.intensity=flash ? 35 : 0; car.blue.intensity=flash ? 0 : 35;
+        }
+        // Kinematic bodies do not collide with each other, so constrain closing speeds explicitly.
+        for (let pass=0;pass<12;pass++) {
+          for (let i=0;i<police.length;i++) for (let j=i+1;j<police.length;j++) {
+            const a=police[i].body, b=police[j].body;
+            const dx=b.position.x-a.position.x, dz=b.position.z-a.position.z, distance=Math.hypot(dx,dz);
+            const nx=distance>1e-6 ? dx/distance : 1, nz=distance>1e-6 ? dz/distance : 0;
+            const separationSpeed=(b.velocity.x-a.velocity.x)*nx+(b.velocity.z-a.velocity.z)*nz;
+            const minimumSpeed=Math.min(3,(5.2-distance)*2);
+            if (separationSpeed<minimumSpeed) {
+              const adjustment=minimumSpeed-separationSpeed;
+              const aNearer=Math.hypot(a.position.x-focus.x,a.position.z-focus.z)<=Math.hypot(b.position.x-focus.x,b.position.z-focus.z);
+              const yielding=aNearer ? b : a, sign=aNearer ? 1 : -1;
+              yielding.velocity.x+=nx*adjustment*sign; yielding.velocity.z+=nz*adjustment*sign;
+            }
+          }
+        }
+        for (const car of police) {
+          car.speed=Math.hypot(car.body.velocity.x,car.body.velocity.z);
+          if (car.speed>.01) car.body.quaternion.setFromEuler(0,Math.atan2(-car.body.velocity.x,-car.body.velocity.z),0);
         }
       }
       let promptMessage = '', promptUntil = 0;
