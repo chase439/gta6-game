@@ -47,6 +47,11 @@
     .speedometer.visible { display: block; }
     .speedometer strong { font: 600 38px/1 "Space Grotesk", sans-serif; letter-spacing: -.05em; }
     .speedometer span { margin-left: 5px; font-size: 10px; font-weight: 700; letter-spacing: .15em; }
+    .radio-banner { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); display: none; min-width: 178px; padding: 10px 16px; border: 1px solid #ffbdcd75; border-radius: 9px; background: #211e2ab8; text-align: center; backdrop-filter: blur(12px); }
+    .radio-banner.visible { display: block; }
+    .radio-banner strong { display: block; color: #ffbdd5; font: 700 14px "Space Grotesk", sans-serif; letter-spacing: .13em; }
+    .radio-banner span { display: block; margin-top: 4px; font-size: 9px; letter-spacing: .16em; }
+    #audio-warning { position: fixed; z-index: 6; left: 50%; top: 75px; transform: translateX(-50%); max-width: 90vw; padding: 10px 14px; border-radius: 8px; background: #531d32; color: white; font-size: 12px; }
     #intro { position: fixed; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(90deg, #211c2c82, #211c2c24); transition: opacity .35s; }
     #intro.hidden { opacity: 0; pointer-events: none; }
     .intro-card { width: min(390px, calc(100vw - 40px)); padding: 30px; border: 1px solid #ffffff45; border-radius: 18px; background: #211c2bdc; box-shadow: 0 25px 80px #1a142c55; backdrop-filter: blur(20px); }
@@ -71,6 +76,7 @@
       .status { display: none; }
       .cash { font-size: 15px; }
       .stars { font-size: 16px; }
+      .radio-banner { top: 100px; }
     }
   </style>
   <script type="importmap">
@@ -97,6 +103,7 @@
     <div class="location"><div class="eyebrow">✦ &nbsp; WELCOME TO PARADISE</div><h1>Ocean Drive</h1><p>A little closer to the sun.</p></div>
     <div id="vehicle-prompt" class="vehicle-prompt"><kbd>F</kbd><span id="vehicle-prompt-text">ENTER VEHICLE</span></div>
     <div id="speedometer" class="speedometer"><strong id="speed">0</strong><span>KM/H</span></div>
+    <div id="radio-banner" class="radio-banner"><strong>WAVE 103.5 FM</strong><span id="radio-status">ON AIR · R TO TOGGLE</span></div>
     <div class="bottom">
       <div class="map-wrap"><canvas id="minimap" width="240" height="240"></canvas><div class="map-label">OCEAN DRIVE<br><span>GOLDEN COAST, FL</span></div></div>
       <div id="foot-controls" class="controls">
@@ -111,6 +118,7 @@
         <div class="control"><kbd>S</kbd> Brake / reverse</div><div class="divider"></div>
         <div class="control"><kbd>SPACE</kbd> Drift</div><div class="divider"></div>
         <div class="control"><kbd>SHIFT</kbd> Boost</div><div class="divider"></div>
+        <div class="control"><kbd>R</kbd> Radio</div><div class="divider"></div>
         <div class="control"><kbd>F</kbd> Exit</div>
       </div>
     </div>
@@ -121,10 +129,11 @@
       <h2>Stay golden.</h2>
       <p>Take the scenic route. Explore palm-lined streets, pastel skylines, and a coastline that goes on forever.</p>
       <button id="start">ENTER THE CITY <span>↗</span></button>
-      <div class="intro-foot">Click to capture mouse · ESC to release</div>
+      <div class="intro-foot">Click to start audio and capture mouse · ESC to release</div>
     </div>
   </div>
   <div id="error" role="alert"></div>
+  <div id="audio-warning" role="alert" hidden></div>
   <script type="module">
     const showError = (message) => {
       const box = document.getElementById('error');
@@ -435,6 +444,134 @@
       let wantedLevel=0, lostSightTime=0, simulationTime=0, lastEscapeUpdate=performance.now();
       const traffic=[], police=[], pedestrians=[], incidentTimes=new Map();
       const stars=document.getElementById('wanted-stars'), escapeLabel=document.getElementById('escape-label');
+      let audio=null, radioEnabled=true;
+      const radioBanner=document.getElementById('radio-banner'), radioStatus=document.getElementById('radio-status');
+      const audioWarning=document.getElementById('audio-warning');
+      function reportAudioError(error) {
+        console.error('Audio initialization failed:',error);
+        audioWarning.textContent='Audio unavailable. Check your browser audio settings and click Enter again to retry.';
+        audioWarning.hidden=false;
+      }
+      function initializeAudio() {
+        let context;
+        try {
+          if (!audio) {
+            const AudioContextClass=window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) throw new Error('Web Audio is not supported by this browser.');
+            context=new AudioContextClass();
+            const master=context.createGain(), compressor=context.createDynamicsCompressor();
+            master.gain.value=0;
+            compressor.threshold.value=-16; compressor.knee.value=12; compressor.ratio.value=5;
+            master.connect(compressor); compressor.connect(context.destination);
+            const buffer=context.createBuffer(1,context.sampleRate*2,context.sampleRate);
+            const samples=buffer.getChannelData(0);
+            for (let i=0;i<samples.length;i++) samples[i]=Math.random()*2-1;
+            const engineFilter=context.createBiquadFilter(), engineGain=context.createGain();
+            engineFilter.type='lowpass'; engineFilter.frequency.value=500;
+            engineGain.gain.value=0; engineFilter.connect(engineGain); engineGain.connect(master);
+            const engineSaw=context.createOscillator(), engineTriangle=context.createOscillator();
+            const triangleMix=context.createGain(); triangleMix.gain.value=.5;
+            engineSaw.type='sawtooth'; engineTriangle.type='triangle';
+            engineSaw.connect(engineFilter); engineTriangle.connect(triangleMix); triangleMix.connect(engineFilter);
+            engineSaw.start(); engineTriangle.start();
+            const skidNoise=context.createBufferSource(), skidFilter=context.createBiquadFilter(), skidGain=context.createGain();
+            skidNoise.buffer=buffer; skidNoise.loop=true; skidFilter.type='bandpass'; skidFilter.frequency.value=1500; skidFilter.Q.value=1.2;
+            skidGain.gain.value=0; skidNoise.connect(skidFilter); skidFilter.connect(skidGain); skidGain.connect(master); skidNoise.start();
+            const siren=context.createOscillator(), sirenGain=context.createGain();
+            siren.type='triangle'; sirenGain.gain.value=0; siren.connect(sirenGain); sirenGain.connect(master); siren.start();
+            const radio=context.createGain(); radio.gain.value=0; radio.connect(master);
+            audio={context,master,buffer,engineFilter,engineGain,engineSaw,engineTriangle,skidFilter,skidGain,siren,sirenGain,radio,
+              radioSources:new Set(), radioPlaying:false, nextBeat:0, beat:0, nextFootstep:0, lastCrash:-10};
+          }
+          if (audio.context.state==='closed') throw new Error('The audio context has closed.');
+          audio.context.resume().then(() => { audioWarning.hidden=true; }).catch(reportAudioError);
+        } catch (error) {
+          if (context && !audio) context.close().catch(closeError => console.error('Audio cleanup failed:',closeError));
+          reportAudioError(error);
+        }
+      }
+      function soundTone(destination, when, duration, frequency, volume, type='triangle', attack=.01, endFrequency=frequency, radioVoice=false) {
+        const context=audio.context, oscillator=context.createOscillator(), gain=context.createGain();
+        oscillator.type=type;
+        oscillator.frequency.setValueAtTime(frequency,when);
+        if (frequency!==endFrequency) oscillator.frequency.exponentialRampToValueAtTime(endFrequency,when+duration);
+        gain.gain.setValueAtTime(.0001,when);
+        gain.gain.exponentialRampToValueAtTime(volume,when+attack);
+        gain.gain.exponentialRampToValueAtTime(.0001,when+duration);
+        oscillator.connect(gain); gain.connect(destination);
+        if (radioVoice) audio.radioSources.add(oscillator);
+        oscillator.onended=() => { audio.radioSources.delete(oscillator); oscillator.disconnect(); gain.disconnect(); };
+        oscillator.start(when); oscillator.stop(when+duration+.01);
+      }
+      function soundNoise(destination, when, duration, volume, frequency, radioVoice=false) {
+        const context=audio.context, source=context.createBufferSource(), filter=context.createBiquadFilter(), gain=context.createGain();
+        source.buffer=audio.buffer; filter.type='bandpass'; filter.frequency.value=frequency; filter.Q.value=.8;
+        gain.gain.setValueAtTime(.0001,when);
+        gain.gain.exponentialRampToValueAtTime(volume,when+.005);
+        gain.gain.exponentialRampToValueAtTime(.0001,when+duration);
+        source.connect(filter); filter.connect(gain); gain.connect(destination);
+        if (radioVoice) audio.radioSources.add(source);
+        source.onended=() => { audio.radioSources.delete(source); source.disconnect(); filter.disconnect(); gain.disconnect(); };
+        source.start(when); source.stop(when+duration+.01);
+      }
+      function crashSound(impact) {
+        if (!audio || !locked || document.hidden || audio.context.state!=='running') return;
+        const now=audio.context.currentTime;
+        if (now-audio.lastCrash<.18) return;
+        audio.lastCrash=now;
+        const volume=Math.min(.18,.04+impact*.008);
+        soundNoise(audio.master,now,.24,volume,1300);
+        soundTone(audio.master,now,.22,180,volume*.55,'triangle',.005,55);
+        soundTone(audio.master,now,.14,560,volume*.25,'square',.005,220);
+      }
+      const chords=[[55,65.41,82.41],[43.65,55,65.41],[65.41,82.41,98],[49,61.74,73.42]];
+      function scheduleRadioStep(when,beat) {
+        const chord=chords[Math.floor(beat/8)%chords.length], note=chord[[0,2,1,2,0,2,1,2][beat%8]];
+        soundTone(audio.radio,when,.22,note,.105,'sawtooth',.012,note,true);
+        if (beat%8===0) {
+          for (const frequency of chord) soundTone(audio.radio,when,2.1,frequency*4,.025,'triangle',.2,frequency*4,true);
+        }
+        if (beat%4===2) soundNoise(audio.radio,when,.13,.12,2100,true);
+        if (beat%4===0) soundTone(audio.radio,when,.18,105,.13,'sine',.005,42,true);
+      }
+      function updateAudio(driving,carSpeed,moving,grounded,running) {
+        if (!audio || audio.context.state!=='running') return;
+        const context=audio.context, now=context.currentTime, audible=locked && !document.hidden;
+        audio.master.gain.setTargetAtTime(audible ? .38 : 0,now,.04);
+        const throttle=driving && keys.has('KeyW');
+        const rpm=48+Math.min(carSpeed,150)*1.8+(throttle ? 18 : 0);
+        audio.engineSaw.frequency.setTargetAtTime(rpm,now,.08);
+        audio.engineTriangle.frequency.setTargetAtTime(rpm*.5,now,.08);
+        audio.engineFilter.frequency.setTargetAtTime(350+rpm*5,now,.1);
+        audio.engineGain.gain.setTargetAtTime(audible && driving ? .07 : 0,now,.08);
+        const drifting=audible && driving && keys.has('Space') && carSpeed>10;
+        audio.skidGain.gain.setTargetAtTime(drifting ? Math.min(.09,.035+carSpeed*.0005) : 0,now,.07);
+        audio.skidFilter.frequency.setTargetAtTime(1100+Math.min(carSpeed,100)*9,now,.08);
+        const focus=driving ? activeCar.body.position : player.position;
+        const distance=police.length ? Math.min(...police.map(car => Math.hypot(car.body.position.x-focus.x,car.body.position.z-focus.z))) : 100;
+        audio.siren.frequency.setTargetAtTime(Math.floor(now*2)%2 ? 880 : 660,now,.045);
+        audio.sirenGain.gain.setTargetAtTime(audible && wantedLevel>0 ? .045/(1+distance/45) : 0,now,.12);
+        if (audible && !driving && moving && grounded && now>=audio.nextFootstep) {
+          soundNoise(audio.master,now,.075,running ? .065 : .045,450);
+          soundTone(audio.master,now,.09,105,.035,'sine',.005,65);
+          audio.nextFootstep=now+(running ? .28 : .42);
+        }
+        const playRadio=audible && driving && radioEnabled;
+        if (playRadio && !audio.radioPlaying) { audio.nextBeat=now+.04; audio.beat=0; }
+        if (!playRadio && audio.radioPlaying) {
+          for (const source of audio.radioSources) source.stop(now+.06);
+          audio.radioSources.clear();
+        }
+        audio.radioPlaying=playRadio;
+        audio.radio.gain.setTargetAtTime(playRadio ? .7 : 0,now,.04);
+        if (playRadio) {
+          if (audio.nextBeat<now-.15) audio.nextBeat=now+.04;
+          while (audio.nextBeat<now+.12) {
+            scheduleRadioStep(audio.nextBeat,audio.beat++);
+            audio.nextBeat+=60/112/2;
+          }
+        }
+      }
       const pedestrianTops=[0xefaaa4,0x71a4a2,0xe5cc8c,0x9b8cb5,0xe8c5b7,0x859e80];
       const personBodyGeometry=new THREE.CapsuleGeometry(.25,.48,4,8);
       const personHeadGeometry=new THREE.SphereGeometry(.22,10,7);
@@ -508,7 +645,9 @@
         }
       }
       for (const car of cars) car.body.addEventListener('collide',event => {
-        if (event.body===groundBody || Math.abs(event.contact.getImpactVelocityAlongNormal())<1.5) return;
+        const impact=Math.abs(event.contact.getImpactVelocityAlongNormal());
+        if (event.body===groundBody || impact<1.5) return;
+        if (car===activeCar) crashSound(impact);
         frightenPedestrians(car.body.position);
         if (car===activeCar && (lampBodies.includes(event.body) || traffic.some(other => other.body===event.body))) raiseWanted(event.body);
       });
@@ -570,6 +709,7 @@
             const offset=new CANNON.Vec3(person.group.position.x-activeCar.body.position.x,1-activeCar.body.position.y,person.group.position.z-activeCar.body.position.z);
             const local=activeCar.body.quaternion.conjugate().vmult(offset);
             if (Math.abs(local.x)<1.25 && Math.abs(local.y)<1.6 && Math.abs(local.z)<2.5 && simulationTime-person.lastHit>3) {
+              crashSound(Math.hypot(activeCar.body.velocity.x,activeCar.body.velocity.z));
               person.lastHit=simulationTime; raiseWanted(person); frightenPedestrians(activeCar.body.position);
             }
           }
@@ -689,6 +829,7 @@
         footControls.style.display = driving ? 'none' : 'flex';
         driveControls.style.display = driving ? 'flex' : 'none';
         speedometer.classList.toggle('visible',driving);
+        radioBanner.classList.toggle('visible',driving);
       }
       function toggleVehicle() {
         if (!activeCar) {
@@ -725,7 +866,9 @@
         keys.clear(); jumpQueued=false; promptMessage='';
       }
       const intro = document.getElementById('intro'), start = document.getElementById('start');
+      document.addEventListener('pointerdown',initializeAudio,{once:true});
       start.addEventListener('click', () => {
+        initializeAudio();
         const request = canvas.requestPointerLock();
         if (request) request.catch(() => showError('Mouse capture was blocked. Please allow pointer lock and try again.'));
       });
@@ -745,13 +888,20 @@
         }
       });
       document.addEventListener('keydown', e => {
-        if (['KeyW','KeyA','KeyS','KeyD','KeyF','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
+        if (['KeyW','KeyA','KeyS','KeyD','KeyF','KeyR','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
         if (locked && e.code === 'KeyF' && !e.repeat) { toggleVehicle(); return; }
+        if (locked && activeCar && e.code === 'KeyR' && !e.repeat) { radioEnabled=!radioEnabled; return; }
         if (locked && !activeCar && e.code === 'Space' && !e.repeat) jumpQueued=true;
         if (locked) keys.add(e.code);
       });
       document.addEventListener('keyup', e => keys.delete(e.code));
       window.addEventListener('blur', () => { keys.clear(); jumpQueued=false; });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && audio && audio.context.state==='running') {
+          const now=audio.context.currentTime;
+          audio.master.gain.setTargetAtTime(0,now,.02);
+        }
+      });
       const cameraRay = new THREE.Ray(), hitPoint = new THREE.Vector3(), lookTarget = new THREE.Vector3(), desired = new THREE.Vector3(), direction = new THREE.Vector3();
       const groundRay = new CANNON.RaycastResult();
       let cameraDistance=8, walkTime=0;
@@ -870,6 +1020,7 @@
         camera.position.copy(desired); camera.lookAt(lookTarget);
         character.visible=!activeCar && cameraDistance>2.8;
         const carSpeed=activeCar ? Math.abs(activeCar.vehicle.currentVehicleSpeedKmHour) : 0;
+        updateAudio(Boolean(activeCar),carSpeed,moving,grounded,speed>5);
         const targetFov=55+Math.min(carSpeed/100,1)*15;
         camera.fov += (targetFov-camera.fov)*(1-Math.exp(-dt*3));
         camera.updateProjectionMatrix();
@@ -877,6 +1028,7 @@
         const showPrompt=activeCar || nearbyCar();
         prompt.classList.toggle('visible',Boolean(showPrompt));
         promptText.textContent=performance.now()<promptUntil ? promptMessage : activeCar ? 'EXIT VEHICLE' : 'ENTER VEHICLE';
+        radioStatus.textContent=!radioEnabled ? 'RADIO OFF · R TO TOGGLE' : !audio || !audioWarning.hidden ? 'AUDIO UNAVAILABLE · R TO TOGGLE' : audio.context.state!=='running' ? 'AUDIO PAUSED · R TO TOGGLE' : 'ON AIR · R TO TOGGLE';
         for (let i=0;i<stars.children.length;i++) stars.children[i].classList.toggle('lit',i<wantedLevel);
         stars.classList.toggle('escaping',wantedLevel>0 && lostSightTime>0);
         stars.setAttribute('aria-label',`Wanted level: ${wantedLevel} of 5`);
