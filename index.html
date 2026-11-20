@@ -33,6 +33,12 @@
     .map-label span { color: #ffe2bd; font-size: 9px; font-weight: 400; letter-spacing: .08em; }
     #minimap { width: 120px; height: 120px; border: 3px solid #ffffffa8; border-radius: 50%; box-shadow: 0 5px 24px #1c182f66; background: #e7bdb2; }
     .center-dot { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; border-radius: 50%; background: #fff; opacity: .65; box-shadow: 0 0 4px #000; }
+    .vehicle-prompt { position: absolute; left: 50%; bottom: 17%; transform: translateX(-50%); display: none; align-items: center; gap: 9px; padding: 10px 14px; border: 1px solid #ffffff50; border-radius: 9px; background: #211e2ab8; backdrop-filter: blur(12px); font-size: 11px; white-space: nowrap; }
+    .vehicle-prompt.visible { display: flex; }
+    .speedometer { position: absolute; right: 38px; bottom: 170px; display: none; text-align: right; text-shadow: 0 2px 20px #24182899; }
+    .speedometer.visible { display: block; }
+    .speedometer strong { font: 600 38px/1 "Space Grotesk", sans-serif; letter-spacing: -.05em; }
+    .speedometer span { margin-left: 5px; font-size: 10px; font-weight: 700; letter-spacing: .15em; }
     #intro { position: fixed; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(90deg, #211c2c82, #211c2c24); transition: opacity .35s; }
     #intro.hidden { opacity: 0; pointer-events: none; }
     .intro-card { width: min(390px, calc(100vw - 40px)); padding: 30px; border: 1px solid #ffffff45; border-radius: 18px; background: #211c2bdc; box-shadow: 0 25px 80px #1a142c55; backdrop-filter: blur(20px); }
@@ -53,6 +59,7 @@
       .divider { display: none; }
       #minimap { width: 84px; height: 84px; }
       .map-label { display: none; }
+      .speedometer { right: 22px; bottom: 120px; }
     }
   </style>
   <script type="importmap">
@@ -74,12 +81,22 @@
     </div>
     <div class="center-dot"></div>
     <div class="location"><div class="eyebrow">✦ &nbsp; WELCOME TO PARADISE</div><h1>Ocean Drive</h1><p>A little closer to the sun.</p></div>
+    <div id="vehicle-prompt" class="vehicle-prompt"><kbd>F</kbd><span id="vehicle-prompt-text">ENTER VEHICLE</span></div>
+    <div id="speedometer" class="speedometer"><strong id="speed">0</strong><span>KM/H</span></div>
     <div class="bottom">
-      <div class="controls">
+      <div id="foot-controls" class="controls">
         <div class="control"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</div><div class="divider"></div>
         <div class="control"><kbd>SHIFT</kbd> Run</div><div class="divider"></div>
         <div class="control"><kbd>SPACE</kbd> Jump</div><div class="divider"></div>
         <div class="control"><kbd>↗</kbd> Look around</div>
+      </div>
+      <div id="drive-controls" class="controls" style="display:none">
+        <div class="control"><kbd>W</kbd> Accelerate</div><div class="divider"></div>
+        <div class="control"><kbd>A</kbd><kbd>D</kbd> Steer</div><div class="divider"></div>
+        <div class="control"><kbd>S</kbd> Brake / reverse</div><div class="divider"></div>
+        <div class="control"><kbd>SPACE</kbd> Drift</div><div class="divider"></div>
+        <div class="control"><kbd>SHIFT</kbd> Boost</div><div class="divider"></div>
+        <div class="control"><kbd>F</kbd> Exit</div>
       </div>
       <div class="map-wrap"><div class="map-label">OCEAN DRIVE<br><span>GOLDEN COAST, FL</span></div><canvas id="minimap" width="240" height="240"></canvas></div>
     </div>
@@ -316,8 +333,130 @@
       part(leftLeg,new THREE.BoxGeometry(.25,.15,.4),shoes,0,-.8,-.08);
       part(rightLeg,new THREE.BoxGeometry(.25,.15,.4),shoes,0,-.8,-.08);
 
+      const carTrim = new THREE.MeshStandardMaterial({ color: 0x222732, metalness: .7, roughness: .34 });
+      const glass = new THREE.MeshStandardMaterial({ color: 0x344c58, metalness: .5, roughness: .2 });
+      const headlight = new THREE.MeshStandardMaterial({ color: 0xe7fbff, emissive: 0x9feaff, emissiveIntensity: 3 });
+      const tire = basic(0x17181c), rim = new THREE.MeshStandardMaterial({ color: 0xc3bfc0, metalness: .85, roughness: .24 });
+      function carBox(parent, material, x, y, z, w, h, d) {
+        return part(parent, new THREE.BoxGeometry(w,h,d), material, x,y,z);
+      }
+      function cabinGeometry() {
+        const geometry = new THREE.BufferGeometry();
+        const v = [
+          [-.88,.27,-1.2], [.88,.27,-1.2], [-.72,.99,-.48], [.72,.99,-.48],
+          [-.88,.27,1.35], [.88,.27,1.35], [-.72,.99,.96], [.72,.99,.96]
+        ];
+        const faces = [0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,4,2, 4,6,2, 1,3,5, 5,3,7, 2,6,3, 3,6,7];
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(faces.flatMap(i => v[i]), 3));
+        geometry.computeVertexNormals();
+        return geometry;
+      }
+      const cabin = cabinGeometry();
+      const wheelGeometry = new THREE.CylinderGeometry(.42,.42,.3,16);
+      wheelGeometry.rotateZ(Math.PI / 2);
+      const rimGeometry = new THREE.CylinderGeometry(.24,.24,.315,12);
+      rimGeometry.rotateZ(Math.PI / 2);
+      function createCar(x, z, color) {
+        const body = new CANNON.Body({
+          mass: 700, position: new CANNON.Vec3(x,1,z),
+          shape: new CANNON.Box(new CANNON.Vec3(.94,.26,2.1)),
+          linearDamping: .04, angularDamping: .38, collisionFilterGroup: 4
+        });
+        const vehicle = new CANNON.RaycastVehicle({ chassisBody: body, indexRightAxis: 0, indexUpAxis: 1, indexForwardAxis: 2 });
+        for (const [wx,wz] of [[-.95,-1.35],[.95,-1.35],[-.95,1.35],[.95,1.35]]) {
+          vehicle.addWheel({
+            chassisConnectionPointLocal: new CANNON.Vec3(wx,0,wz),
+            directionLocal: new CANNON.Vec3(0,-1,0), axleLocal: new CANNON.Vec3(-1,0,0),
+            radius: .42, suspensionRestLength: .36, maxSuspensionTravel: .24,
+            suspensionStiffness: 32, dampingCompression: 4.4, dampingRelaxation: 5.2,
+            maxSuspensionForce: 100000, frictionSlip: 4, rollInfluence: .05,
+            useCustomSlidingRotationalSpeed: true, customSlidingRotationalSpeed: -25
+          });
+        }
+        vehicle.addToWorld(world);
+        const group = new THREE.Group();
+        const paint = new THREE.MeshPhysicalMaterial({ color, metalness: .75, roughness: .24, clearcoat: 1, clearcoatRoughness: .16 });
+        const brakeLight = new THREE.MeshStandardMaterial({ color: 0xff6a69, emissive: 0xff181f, emissiveIntensity: 1.5 });
+        carBox(group,paint,0,0,0,1.95,.52,4.35);
+        carBox(group,paint,0,.26,-1.46,1.9,.18,1.1);
+        carBox(group,carTrim,0,-.17,0,2.01,.16,4.4);
+        part(group,cabin,glass,0,0,0);
+        carBox(group,paint,0,1.01,.25,1.48,.08,1.45);
+        carBox(group,carTrim,0,.43,1.83,1.65,.08,.28);
+        for (const side of [-1,1]) {
+          carBox(group,headlight,side*.62,.05,-2.19,.56,.14,.04);
+          carBox(group,brakeLight,side*.65,.05,2.19,.55,.13,.04);
+          carBox(group,carTrim,side*1,.17,.22,.07,.07,1.5);
+          carBox(group,carTrim,side*1.04,.47,-.6,.18,.12,.25);
+        }
+        scene.add(group);
+        const wheels = vehicle.wheelInfos.map(() => {
+          const wheel = new THREE.Group();
+          part(wheel,wheelGeometry,tire,0,0,0);
+          part(wheel,rimGeometry,rim,0,0,0);
+          scene.add(wheel);
+          return wheel;
+        });
+        return { body, vehicle, group, wheels, brakeLight };
+      }
+      const cars = [createCar(2.6,64,0xd66a7f), createCar(-45,-8,0x68a9b5), createCar(51,25,0xdbc2a0)];
+      // Physical boundaries keep vehicles in the same playable area as the pedestrian.
+      for (const [x,z,w,d] of [[-104,0,2,210],[154,0,2,210],[25,-104,260,2],[25,104,260,2]]) {
+        world.addBody(new CANNON.Body({ mass: 0, position: new CANNON.Vec3(x,2,z), shape: new CANNON.Box(new CANNON.Vec3(w/2,2,d/2)) }));
+      }
+
       const keys = new Set();
-      let yaw = -.35, pitch = .23, cameraYaw = yaw, cameraPitch = pitch, jumpQueued = false, locked = false;
+      let yaw = -.35, pitch = .23, cameraYaw = yaw, cameraPitch = pitch, driveOrbit = 0, jumpQueued = false, locked = false, activeCar = null;
+      let promptMessage = '', promptUntil = 0;
+      const prompt = document.getElementById('vehicle-prompt'), promptText = document.getElementById('vehicle-prompt-text');
+      const footControls = document.getElementById('foot-controls'), driveControls = document.getElementById('drive-controls');
+      const speedometer = document.getElementById('speedometer'), speedText = document.getElementById('speed');
+      function nearbyCar() {
+        let nearest = null, distance = 4;
+        for (const car of cars) {
+          const dx=car.body.position.x-player.position.x, dz=car.body.position.z-player.position.z;
+          const d=Math.hypot(dx,dz,car.body.position.y-player.position.y);
+          if (d < distance) { nearest=car; distance=d; }
+        }
+        return nearest;
+      }
+      function setDrivingUI(driving) {
+        footControls.style.display = driving ? 'none' : 'flex';
+        driveControls.style.display = driving ? 'flex' : 'none';
+        speedometer.classList.toggle('visible',driving);
+      }
+      function toggleVehicle() {
+        if (!activeCar) {
+          const car = nearbyCar();
+          if (!car) return;
+          activeCar=car;
+          world.removeBody(player);
+          character.visible=false;
+          const back=car.body.quaternion.vmult(new CANNON.Vec3(0,0,1));
+          yaw=Math.atan2(back.x,back.z);
+          driveOrbit=Math.atan2(Math.sin(cameraYaw-yaw),Math.cos(cameraYaw-yaw));
+          pitch=.25;
+          setDrivingUI(true);
+        } else {
+          const car=activeCar;
+          const right=car.body.quaternion.vmult(new CANNON.Vec3(1,0,0));
+          const length=Math.hypot(right.x,right.z);
+          if (length < .1) { promptMessage='NO CLEAR SPACE TO EXIT'; promptUntil=performance.now()+2000; return; }
+          const candidates=[-2.15,2.15].map(side => new THREE.Vector3(car.body.position.x+right.x/length*side,.55,car.body.position.z+right.z/length*side));
+          const exit=candidates.find(p => p.x>=-101 && p.x<=151 && p.z>=-101 && p.z<=101 &&
+            !obstacles.some(bounds => bounds.clone().expandByScalar(.6).containsPoint(p)) &&
+            !cars.some(other => other!==car && Math.hypot(other.body.position.x-p.x,other.body.position.z-p.z)<3));
+          if (!exit) { promptMessage='NO CLEAR SPACE TO EXIT'; promptUntil=performance.now()+2000; return; }
+          car.body.velocity.setZero(); car.body.angularVelocity.setZero();
+          player.position.set(exit.x,exit.y,exit.z); player.velocity.setZero(); player.angularVelocity.setZero();
+          player.previousPosition.copy(player.position); player.interpolatedPosition.copy(player.position);
+          player.aabbNeedsUpdate=true; world.addBody(player); player.wakeUp();
+          activeCar=null;
+          yaw=cameraYaw; pitch=cameraPitch;
+          setDrivingUI(false);
+        }
+        keys.clear(); jumpQueued=false; promptMessage='';
+      }
       const intro = document.getElementById('intro'), start = document.getElementById('start');
       start.addEventListener('click', () => {
         const request = canvas.requestPointerLock();
@@ -330,10 +469,17 @@
         if (!locked) { keys.clear(); jumpQueued=false; }
       });
       document.addEventListener('pointerlockerror', () => showError('Mouse capture was blocked. Please allow pointer lock and try again.'));
-      document.addEventListener('mousemove', e => { if (locked) { yaw -= e.movementX*.0025; pitch = THREE.MathUtils.clamp(pitch+e.movementY*.002, -.15, .75); } });
+      document.addEventListener('mousemove', e => {
+        if (locked) {
+          if (activeCar) driveOrbit -= e.movementX*.0025;
+          else yaw -= e.movementX*.0025;
+          pitch = THREE.MathUtils.clamp(pitch+e.movementY*.002, -.15, .75);
+        }
+      });
       document.addEventListener('keydown', e => {
-        if (['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
-        if (locked && e.code === 'Space' && !e.repeat) jumpQueued=true;
+        if (['KeyW','KeyA','KeyS','KeyD','KeyF','Space','ShiftLeft','ShiftRight'].includes(e.code)) e.preventDefault();
+        if (locked && e.code === 'KeyF' && !e.repeat) { toggleVehicle(); return; }
+        if (locked && !activeCar && e.code === 'Space' && !e.repeat) jumpQueued=true;
         if (locked) keys.add(e.code);
       });
       document.addEventListener('keyup', e => keys.delete(e.code));
@@ -351,50 +497,97 @@
         for(const p of lines) { mc.beginPath();mc.moveTo(tx(p),tz(-102));mc.lineTo(tx(p),tz(102));mc.stroke(); mc.beginPath();mc.moveTo(tx(-102),tz(p));mc.lineTo(tx(102),tz(p));mc.stroke(); }
         mc.fillStyle='#c99291';
         for(const x of centers) for(const z of centers) mc.fillRect(tx(x-12),tz(z-12),21,21);
-        mc.save(); mc.translate(tx(player.position.x),tz(player.position.z)); mc.rotate(-cameraYaw); mc.fillStyle='#fff'; mc.strokeStyle='#503e4d'; mc.lineWidth=3; mc.beginPath();mc.moveTo(0,-10);mc.lineTo(7,8);mc.lineTo(0,5);mc.lineTo(-7,8);mc.closePath();mc.fill();mc.stroke();mc.restore();
+        mc.fillStyle='#f9f2d8';
+        for (const car of cars) { mc.beginPath(); mc.arc(tx(car.body.position.x),tz(car.body.position.z),3,0,Math.PI*2); mc.fill(); }
+        const focus=activeCar ? activeCar.body.position : player.position;
+        mc.save(); mc.translate(tx(focus.x),tz(focus.z)); mc.rotate(-cameraYaw); mc.fillStyle='#fff'; mc.strokeStyle='#503e4d'; mc.lineWidth=3; mc.beginPath();mc.moveTo(0,-10);mc.lineTo(7,8);mc.lineTo(0,5);mc.lineTo(-7,8);mc.closePath();mc.fill();mc.stroke();mc.restore();
       }
       function update(dt) {
-        cameraYaw += (yaw-cameraYaw)*(1-Math.exp(-dt*14));
+        if (activeCar) {
+          const back=activeCar.body.quaternion.vmult(new CANNON.Vec3(0,0,1));
+          driveOrbit *= Math.exp(-dt*.4);
+          yaw=Math.atan2(back.x,back.z)+driveOrbit;
+        }
+        cameraYaw += Math.atan2(Math.sin(yaw-cameraYaw),Math.cos(yaw-cameraYaw))*(1-Math.exp(-dt*(activeCar ? 3 : 14)));
         cameraPitch += (pitch-cameraPitch)*(1-Math.exp(-dt*14));
         const forward = new THREE.Vector3(-Math.sin(cameraYaw),0,-Math.cos(cameraYaw));
         const right = new THREE.Vector3(Math.cos(cameraYaw),0,-Math.sin(cameraYaw));
         const move = new THREE.Vector3();
-        if(keys.has('KeyW')) move.add(forward);
-        if(keys.has('KeyS')) move.sub(forward);
-        if(keys.has('KeyD')) move.add(right);
-        if(keys.has('KeyA')) move.sub(right);
+        if(!activeCar && keys.has('KeyW')) move.add(forward);
+        if(!activeCar && keys.has('KeyS')) move.sub(forward);
+        if(!activeCar && keys.has('KeyD')) move.add(right);
+        if(!activeCar && keys.has('KeyA')) move.sub(right);
         const moving = move.lengthSq()>0;
         const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 9 : 5;
         if(moving) move.normalize().multiplyScalar(speed);
-        player.velocity.x=move.x; player.velocity.z=move.z;
-        world.raycastClosest(player.position, new CANNON.Vec3(player.position.x,player.position.y-.68,player.position.z), { skipBackfaces: true, collisionFilterMask: 1 }, groundRay);
-        const grounded = groundRay.hasHit && groundRay.body !== player && groundRay.hitNormalWorld.y > .5;
-        if(jumpQueued && grounded) player.velocity.y=8;
-        jumpQueued=false;
-        world.step(1/60,dt,3);
-        // Keep the playable neighborhood bounded, including the beach.
-        player.position.x=THREE.MathUtils.clamp(player.position.x,-101,151);
-        player.position.z=THREE.MathUtils.clamp(player.position.z,-101,101);
-        character.position.set(player.position.x,player.position.y-.55,player.position.z);
-        if(moving) {
-          const targetAngle = Math.atan2(-move.x,-move.z);
-          character.rotation.y += Math.atan2(Math.sin(targetAngle-character.rotation.y),Math.cos(targetAngle-character.rotation.y))*Math.min(1,dt*12);
-          walkTime += dt*(speed>5?13:9);
+        let grounded=false;
+        if (!activeCar) {
+          player.velocity.x=move.x; player.velocity.z=move.z;
+          world.raycastClosest(player.position, new CANNON.Vec3(player.position.x,player.position.y-.68,player.position.z), { skipBackfaces: true, collisionFilterMask: 1 }, groundRay);
+          grounded = groundRay.hasHit && groundRay.body !== player && groundRay.hitNormalWorld.y > .5;
+          if(jumpQueued && grounded) player.velocity.y=8;
         }
-        const swing=moving && grounded ? Math.sin(walkTime)*.65 : 0;
-        leftLeg.rotation.x=swing; rightLeg.rotation.x=-swing; leftArm.rotation.x=-swing*.75; rightArm.rotation.x=swing*.75;
-        const target = new THREE.Vector3(player.position.x, player.position.y+1.25, player.position.z);
-        lookTarget.copy(target);
+        jumpQueued=false;
+        for (const car of cars) {
+          const driving=car===activeCar, drifting=driving && keys.has('Space');
+          const forwardSpeed=car.body.quaternion.vmult(new CANNON.Vec3(0,0,-1)).dot(car.body.velocity);
+          const braking=driving && ((keys.has('KeyS') && forwardSpeed>.6) || (keys.has('KeyW') && forwardSpeed<-.6));
+          const accelerating=driving && keys.has('KeyW') && !keys.has('KeyS') && !braking;
+          const reversing=driving && keys.has('KeyS') && !keys.has('KeyW') && !braking;
+          const force=accelerating ? (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 3400 : 2000) : reversing ? -1200 : 0;
+          const steer=driving ? ((keys.has('KeyA') ? 1 : 0)-(keys.has('KeyD') ? 1 : 0))*.43 : 0;
+          for (let i=0;i<4;i++) {
+            car.vehicle.setSteeringValue(i<2 ? steer : 0,i);
+            car.vehicle.applyEngineForce(i>=2 ? force : 0,i);
+            car.vehicle.setBrake(!driving ? 25 : braking ? 30 : drifting && i>=2 ? 35 : 0,i);
+            car.vehicle.wheelInfos[i].frictionSlip=drifting && i>=2 ? .65 : 4;
+          }
+          car.brakeLight.emissiveIntensity=braking || drifting || reversing ? 4 : 1.5;
+        }
+        world.step(1/60,dt,3);
+        for (const car of cars) {
+          car.group.position.copy(car.body.position);
+          car.group.quaternion.copy(car.body.quaternion);
+          car.wheels.forEach((wheel,i) => {
+            car.vehicle.updateWheelTransform(i);
+            const transform=car.vehicle.wheelInfos[i].worldTransform;
+            wheel.position.copy(transform.position); wheel.quaternion.copy(transform.quaternion);
+          });
+        }
+        if (!activeCar) {
+          player.position.x=THREE.MathUtils.clamp(player.position.x,-101,151);
+          player.position.z=THREE.MathUtils.clamp(player.position.z,-101,101);
+          character.position.set(player.position.x,player.position.y-.55,player.position.z);
+          if(moving) {
+            const targetAngle = Math.atan2(-move.x,-move.z);
+            character.rotation.y += Math.atan2(Math.sin(targetAngle-character.rotation.y),Math.cos(targetAngle-character.rotation.y))*Math.min(1,dt*12);
+            walkTime += dt*(speed>5?13:9);
+          }
+          const swing=moving && grounded ? Math.sin(walkTime)*.65 : 0;
+          leftLeg.rotation.x=swing; rightLeg.rotation.x=-swing; leftArm.rotation.x=-swing*.75; rightArm.rotation.x=swing*.75;
+        }
+        const focus=activeCar ? activeCar.body.position : player.position;
+        const target = new THREE.Vector3(focus.x, focus.y+1.25, focus.z);
+        lookTarget.lerp(target,1-Math.exp(-dt*7));
+        if (obstacles.some(bounds => bounds.containsPoint(lookTarget))) lookTarget.copy(target);
         direction.set(Math.sin(cameraYaw)*Math.cos(cameraPitch),Math.sin(cameraPitch),Math.cos(cameraYaw)*Math.cos(cameraPitch)).normalize();
         cameraRay.set(lookTarget,direction);
-        let safeDistance=8;
+        let safeDistance=activeCar ? 10 : 8;
         for (const bounds of obstacles) {
           if (cameraRay.intersectBox(bounds, hitPoint)) safeDistance=Math.min(safeDistance,Math.max(0,hitPoint.distanceTo(lookTarget)-.05));
         }
         cameraDistance = safeDistance < cameraDistance ? safeDistance : THREE.MathUtils.lerp(cameraDistance,safeDistance,1-Math.exp(-dt*4));
         desired.copy(lookTarget).addScaledVector(direction,cameraDistance);
         camera.position.copy(desired); camera.lookAt(lookTarget);
-        character.visible=cameraDistance>2.8;
+        character.visible=!activeCar && cameraDistance>2.8;
+        const carSpeed=activeCar ? Math.abs(activeCar.vehicle.currentVehicleSpeedKmHour) : 0;
+        const targetFov=55+Math.min(carSpeed/100,1)*15;
+        camera.fov += (targetFov-camera.fov)*(1-Math.exp(-dt*3));
+        camera.updateProjectionMatrix();
+        speedText.textContent=Math.round(carSpeed);
+        const showPrompt=activeCar || nearbyCar();
+        prompt.classList.toggle('visible',Boolean(showPrompt));
+        promptText.textContent=performance.now()<promptUntil ? promptMessage : activeCar ? 'EXIT VEHICLE' : 'ENTER VEHICLE';
         drawMap();
       }
       lookTarget.set(player.position.x,player.position.y+1.25,player.position.z);
