@@ -40,10 +40,12 @@ Missions award in-game cash. Missions 2-4 require a car. Follow the markers and 
 
 ## Run locally
 
-From the repository directory, start a local web server:
+Open [`index.html`](./index.html) directly in a modern desktop browser with WebGL enabled. No local server or Python is required. An internet connection is still needed to load the libraries from the CDN.
+
+Alternatively, if you prefer to use a local server, run this from the repository directory:
 
 ```shell
 python -m http.server 8000
 ```
 
-Open [http://localhost:8000](http://localhost:8000) in a modern desktop browser with WebGL enabled. Python is only needed for this optional local server, not to play the hosted game.
+Then open [http://localhost:8000](http://localhost:8000).
